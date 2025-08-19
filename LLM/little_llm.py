@@ -1,0 +1,545 @@
+"""
+Lightweight example implementation of a Transformer-based LLM with a Mixture-of-Experts (MoE)
+module, plus a simple tokenizer and a training method.
+
+Features added compared to previous version:
+- Simple whitespace+punctuation tokenizer with vocab building, encode/decode, save/load
+- TextDataset for sliding-window example creation
+- A `train_model` method on SimpleLLM for training on plain text data (with AdamW, amp support,
+  gradient clipping, checkpointing)
+
+Note: This is educational code and not production-optimized. Use small configs to test locally.
+"""
+
+from pathlib import Path
+from typing import Optional, List, Iterable, Tuple
+import math
+import os
+import re
+import json
+import random
+from collections import Counter
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+
+
+def load_texts_from_path(path: str, encoding: str = 'utf-8', split_mode: str = 'paragraph', *, min_chars: int = 1, max_chars: Optional[int] = None, recursive: bool = False) -> List[str]:
+    """
+    Load text(s) from a file path, directory, or glob pattern and return a list of text segments.
+
+    Parameters
+    ----------
+    path : str
+        Path to a single .txt file, a directory containing .txt files, or a glob pattern (e.g. "data/*.txt").
+    encoding : str
+        File encoding used to read files (default 'utf-8').
+    split_mode : str
+        How to split file contents into texts. Options:
+        - 'paragraph' : split on blank lines (default)
+        - 'line'      : split on individual lines
+        - 'sentence'  : split on sentence boundaries using punctuation
+        - 'whole'     : return the entire file contents as one string
+    min_chars : int
+        Minimum number of characters for a text segment to be kept.
+    max_chars : Optional[int]
+        If provided, long segments will be chunked into pieces of at most max_chars characters.
+    recursive : bool
+        When `path` is a directory or a glob, search files recursively if True.
+
+    Returns
+    -------
+    List[str]
+        A list of text strings ready to be passed to the tokenizer or dataset builder.
+    """
+    p = Path(path)
+    files: List[Path] = []
+    if p.exists() and p.is_file():
+        files = [p]
+    elif p.exists() and p.is_dir():
+        files = list(p.rglob("*.txt")) if recursive else list(p.glob("*.txt"))
+    else:
+        # treat as glob pattern
+        import glob
+        matches = glob.glob(path, recursive=recursive)
+        files = [Path(m) for m in matches]
+
+    texts: List[str] = []
+    for fp in files:
+        try:
+            raw = fp.read_text(encoding=encoding)
+        except Exception:
+            # skip files we can't read
+            continue
+        # normalize newlines
+        raw = raw.replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not raw:
+            continue
+
+        if split_mode == 'line':
+            parts = [ln.strip() for ln in raw.split('\n') if ln.strip()]
+        elif split_mode == 'paragraph':
+            parts = [p.strip() for p in re.split(r"\n\s*\n", raw) if p.strip()]
+        elif split_mode == 'sentence':
+            parts = [s.strip() for s in re.split(r'(?<=[.!?])\s+', raw) if s.strip()]
+        elif split_mode == 'whole':
+            parts = [raw]
+        else:
+            raise ValueError(f"Unknown split_mode: {split_mode}")
+
+        for part in parts:
+            if max_chars is not None and len(part) > max_chars:
+                # naive chunking: cut into fixed-size pieces (preserves characters, not tokens)
+                start = 0
+                while start < len(part):
+                    chunk = part[start : start + max_chars].strip()
+                    if len(chunk) >= min_chars:
+                        texts.append(chunk)
+                    start += max_chars
+            else:
+                if len(part) >= min_chars:
+                    texts.append(part)
+
+    return texts
+
+
+
+# -------------------- Tokenizer --------------------
+class SimpleTokenizer:
+    """A minimal tokenizer for experimentation.
+
+    Behavior:
+    - Lowercases text (configurable)
+    - Splits on whitespace and punctuation
+    - Builds a vocabulary from training texts with a min frequency and max vocab size
+    - Provides encode/decode, save/load
+
+    This is intentionally simple — for production use HuggingFace tokenizers or sentencepiece.
+    """
+
+    _split_re = re.compile(r"(\w+|[^\w\s])", flags=re.UNICODE)
+
+    def __init__(self, do_lower: bool = True, unk_token: str = "<unk>", pad_token: str = "<pad>"):
+        self.do_lower = do_lower
+        self.unk_token = unk_token
+        self.pad_token = pad_token
+
+        self.vocab = {}            # token -> id
+        self.id_to_token = {}      # id -> token
+        self.frozen = False
+
+    def tokenize(self, text: str) -> List[str]:
+        if self.do_lower:
+            text = text.lower()
+        tokens = self._split_re.findall(text)
+        return tokens
+
+    def build_vocab(self, texts: Iterable[str], max_vocab: int = 30000, min_freq: int = 2):
+        if self.frozen:
+            raise RuntimeError("vocab already built/frozen")
+        counter = Counter()
+        for t in texts:
+            counter.update(self.tokenize(t))
+        # keep tokens above min_freq
+        items = [(tok, freq) for tok, freq in counter.items() if freq >= min_freq]
+        items.sort(key=lambda x: (-x[1], x[0]))
+        # reserve ids for special tokens
+        vocab_list = [self.pad_token, self.unk_token] + [tok for tok, _ in items[: max_vocab - 2]]
+        self.vocab = {tok: i for i, tok in enumerate(vocab_list)}
+        self.id_to_token = {i: tok for tok, i in self.vocab.items()}
+        self.frozen = True
+
+    def encode(self, text: str, add_eos: bool = False) -> List[int]:
+        tokens = self.tokenize(text)
+        ids = [self.vocab.get(t, self.vocab.get(self.unk_token)) for t in tokens]
+        if add_eos:
+            ids.append(self.vocab.get(self.unk_token))
+        return ids
+
+    def decode(self, ids: List[int]) -> str:
+        tokens = [self.id_to_token.get(i, self.unk_token) for i in ids]
+        return "".join(self._reconstruct_spacing(tokens))
+
+    def _reconstruct_spacing(self, tokens: List[str]) -> List[str]:
+        # join tokens inserting spaces between alphanumeric tokens and where appropriate
+        out = []
+        prev_was_word = False
+        for t in tokens:
+            if re.match(r"^\w+$", t):
+                if prev_was_word:
+                    out.append(" ")
+                out.append(t)
+                prev_was_word = True
+            else:
+                out.append(t)
+                prev_was_word = False
+        return out
+
+    def save(self, path: str):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({
+                "do_lower": self.do_lower,
+                "unk_token": self.unk_token,
+                "pad_token": self.pad_token,
+                "vocab": self.vocab,
+            }, f, ensure_ascii=False, indent=2)
+
+    @classmethod
+    def load(cls, path: str):
+        with open(path, "r", encoding="utf-8") as f:
+            obj = json.load(f)
+        tk = cls(do_lower=obj.get("do_lower", True), unk_token=obj.get("unk_token", "<unk>"), pad_token=obj.get("pad_token", "<pad>"))
+        tk.vocab = obj["vocab"]
+        tk.id_to_token = {int(i): t for t, i in tk.vocab.items()}
+        tk.frozen = True
+        return tk
+
+
+# -------------------- Dataset --------------------
+class TextDataset(Dataset):
+    """Creates training examples from raw texts using a sliding window.
+
+    Each example is a sequence of token ids of length `seq_len`. If a text is longer than seq_len,
+    we create multiple examples by sliding with stride `stride`.
+    """
+
+    def __init__(self, texts: List[str], tokenizer: SimpleTokenizer, seq_len: int = 128, stride: int = 64):
+        if not tokenizer.frozen:
+            raise RuntimeError("tokenizer must have a built vocab")
+        self.seq_len = seq_len
+        self.tokenizer = tokenizer
+        self.examples = []  # list of lists (token ids)
+        for t in texts:
+            ids = tokenizer.encode(t)
+            if len(ids) == 0:
+                continue
+            if len(ids) <= seq_len:
+                self.examples.append(ids + [tokenizer.vocab[tokenizer.pad_token]] * (seq_len - len(ids)))
+            else:
+                i = 0
+                while i < len(ids):
+                    chunk = ids[i : i + seq_len]
+                    if len(chunk) < seq_len:
+                        chunk = chunk + [tokenizer.vocab[tokenizer.pad_token]] * (seq_len - len(chunk))
+                    self.examples.append(chunk)
+                    if i + seq_len >= len(ids):
+                        break
+                    i += stride
+
+    def __len__(self):
+        return len(self.examples)
+
+    def __getitem__(self, idx):
+        return torch.tensor(self.examples[idx], dtype=torch.long)
+
+
+# -------------------- Transformer & MoE --------------------
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model: int, max_len: int = 2048):
+        super().__init__()
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len).unsqueeze(1).float()
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+        self.register_buffer("pe", pe)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        seq_len = x.size(1)
+        return x + self.pe[:, :seq_len, :]
+
+
+class MultiHeadSelfAttention(nn.Module):
+    def __init__(self, d_model: int, n_heads: int, dropout: float = 0.1):
+        super().__init__()
+        assert d_model % n_heads == 0, "d_model must be divisible by n_heads"
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.head_dim = d_model // n_heads
+        self.qkv_proj = nn.Linear(d_model, 3 * d_model)
+        self.out_proj = nn.Linear(d_model, d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor, attn_mask: Optional[torch.Tensor] = None):
+        batch, seq, _ = x.shape
+        qkv = self.qkv_proj(x)
+        qkv = qkv.view(batch, seq, 3, self.n_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
+        if attn_mask is not None:
+            scores = scores + attn_mask
+        attn = F.softmax(scores, dim=-1)
+        attn = self.dropout(attn)
+        context = torch.matmul(attn, v)
+        context = context.transpose(1, 2).contiguous().view(batch, seq, self.d_model)
+        out = self.out_proj(context)
+        return out
+
+
+class FeedForward(nn.Module):
+    def __init__(self, d_model: int, d_ff: int, dropout: float = 0.1, activation=F.gelu):
+        super().__init__()
+        self.fc1 = nn.Linear(d_model, d_ff)
+        self.fc2 = nn.Linear(d_ff, d_model)
+        self.dropout = nn.Dropout(dropout)
+        self.activation = activation
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.fc1(x)
+        x = self.activation(x)
+        x = self.dropout(x)
+        x = self.fc2(x)
+        return x
+
+
+class MoE(nn.Module):
+    def __init__(self, d_model: int, d_ff: int, n_experts: int = 4, k: int = 2, dropout: float = 0.1, activation=F.gelu):
+        super().__init__()
+        assert k >= 1 and k <= n_experts, "k must be between 1 and n_experts"
+        self.d_model = d_model
+        self.n_experts = n_experts
+        self.k = k
+        self.experts = nn.ModuleList([FeedForward(d_model, d_ff, dropout, activation) for _ in range(n_experts)])
+        self.gate = nn.Linear(d_model, n_experts)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch, seq, d = x.shape
+        logits = self.gate(x)
+        probs = F.softmax(logits, dim=-1)
+        if self.k < self.n_experts:
+            topk_vals, topk_idx = torch.topk(probs, self.k, dim=-1)
+            mask = torch.zeros_like(probs)
+            mask.scatter_(-1, topk_idx, 1.0)
+            probs = probs * mask
+            denom = probs.sum(dim=-1, keepdim=True)
+            denom = denom + (denom == 0).float()
+            probs = probs / denom
+        expert_outputs = []
+        for expert in self.experts:
+            expert_outputs.append(expert(x))
+        expert_stack = torch.stack(expert_outputs, dim=0).permute(1, 2, 0, 3)
+        probs_expanded = probs.unsqueeze(-1)
+        moe_out = torch.sum(probs_expanded * expert_stack, dim=2)
+        moe_out = self.dropout(moe_out)
+        return moe_out
+
+
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model: int, n_heads: int, d_ff: int, dropout: float = 0.1, use_moe: bool = False, moe_params: Optional[dict] = None):
+        super().__init__()
+        self.ln1 = nn.LayerNorm(d_model)
+        self.attn = MultiHeadSelfAttention(d_model, n_heads, dropout)
+        self.ln2 = nn.LayerNorm(d_model)
+        self.use_moe = use_moe
+        if use_moe:
+            moe_params = moe_params or {}
+            self.ff = MoE(d_model=d_model, d_ff=d_ff, **moe_params)
+        else:
+            self.ff = FeedForward(d_model, d_ff, dropout)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor, attn_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        x = x + self.dropout(self.attn(self.ln1(x), attn_mask=attn_mask))
+        x = x + self.dropout(self.ff(self.ln2(x)))
+        return x
+
+
+def build_causal_mask(seq_len: int, device: torch.device) -> torch.Tensor:
+    # returns shape (1, 1, seq_len, seq_len) with 0 for allowed and -1e9 for masked
+    mask = torch.tril(torch.ones((seq_len, seq_len), device=device)).unsqueeze(0).unsqueeze(0)
+    mask = (1.0 - mask) * -1e9
+    return mask
+
+
+class SimpleLLM(nn.Module):
+    def __init__(self, vocab_size: int, d_model: int = 512, n_heads: int = 8, d_ff: int = 2048, n_layers: int = 6,
+                 max_seq_len: int = 1024, dropout: float = 0.1, moe_every: int = 2, n_experts: int = 6, moe_k: int = 2):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.d_model = d_model
+        self.token_emb = nn.Embedding(vocab_size, d_model)
+        self.pos_emb = PositionalEncoding(d_model, max_len=max_seq_len)
+        self.layers = nn.ModuleList()
+        for i in range(n_layers):
+            use_moe = ((i % moe_every) == (moe_every - 1)) and (n_experts > 1)
+            moe_params = {"n_experts": n_experts, "k": moe_k, "dropout": dropout} if use_moe else None
+            blk = TransformerBlock(d_model, n_heads, d_ff, dropout, use_moe, moe_params)
+            self.layers.append(blk)
+        self.ln_f = nn.LayerNorm(d_model)
+        self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
+        self._tie_weights()
+
+    def _tie_weights(self):
+        try:
+            self.lm_head.weight = self.token_emb.weight
+        except Exception:
+            pass
+
+    def forward(self, input_ids: torch.LongTensor, attn_mask: Optional[torch.Tensor] = None):
+        x = self.token_emb(input_ids) * math.sqrt(self.d_model)
+        x = self.pos_emb(x)
+        for layer in self.layers:
+            x = layer(x, attn_mask=attn_mask)
+        x = self.ln_f(x)
+        logits = self.lm_head(x)
+        return logits
+
+    @torch.no_grad()
+    def generate(self, input_ids: torch.LongTensor, max_new_tokens: int = 50, eos_token_id: Optional[int] = None):
+        device = input_ids.device
+        for _ in range(max_new_tokens):
+            seq_len = input_ids.size(1)
+            attn_mask = build_causal_mask(seq_len, device=device)
+            logits = self.forward(input_ids, attn_mask=attn_mask)
+            next_token_logits = logits[:, -1, :]
+            next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            input_ids = torch.cat([input_ids, next_token], dim=1)
+            if eos_token_id is not None:
+                if (next_token == eos_token_id).all():
+                    break
+        return input_ids
+
+    def train_model(self,
+                    texts: Optional[List[str]] = None,
+                    dataset: Optional[TextDataset] = None,
+                    tokenizer: Optional[SimpleTokenizer] = None,
+                    epochs: int = 3,
+                    batch_size: int = 16,
+                    lr: float = 5e-5,
+                    device: Optional[str] = None,
+                    seq_len: int = 128,
+                    stride: int = 64,
+                    gradient_clip: float = 1.0,
+                    save_dir: Optional[str] = None,
+                    save_every_steps: int = 1000,
+                    use_amp: bool = True,
+                    print_every: int = 50):
+        """
+        Train the model on raw texts or a prebuilt TextDataset.
+
+        - If `texts` is provided, `tokenizer` must be provided and the dataset will be built.
+        - `device` can be 'cpu' or 'cuda'. If None, chosen automatically.
+        - Checkpoints (model + optimizer state) are saved to `save_dir` if provided.
+        """
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = torch.device(device)
+        self.to(device)
+
+        if dataset is None:
+            if texts is None or tokenizer is None:
+                raise ValueError("Provide either dataset or (texts and tokenizer)")
+            dataset = TextDataset(texts, tokenizer, seq_len=seq_len, stride=stride)
+
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+
+        optimizer = torch.optim.AdamW(self.parameters(), lr=lr)
+        scaler = torch.amp.GradScaler(device = device ,enabled=(use_amp and device.type == "cuda"))
+        global_step = 0
+
+        if save_dir is not None:
+            os.makedirs(save_dir, exist_ok=True)
+
+        self.train()
+        for epoch in range(1, epochs + 1):
+            running_loss = 0.0
+            for step, batch in enumerate(dataloader, start=1):
+                input_ids = batch.to(device)  # (batch, seq)
+                seq = input_ids.size(1)
+                attn_mask = build_causal_mask(seq, device=device)
+                labels = input_ids.clone()
+                optimizer.zero_grad()
+
+                with torch.amp.autocast(device_type=device.type, enabled=(use_amp and device.type == "cuda")):
+                    logits = self.forward(input_ids, attn_mask=attn_mask)
+                    # shift logits and labels for next-token prediction
+                    shift_logits = logits[:, :-1, :].contiguous()
+                    shift_labels = labels[:, 1:].contiguous()
+                    loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1), ignore_index=tokenizer.vocab[tokenizer.pad_token] if tokenizer else -100)
+
+                scaler.scale(loss).backward()
+                # gradient clipping
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(self.parameters(), gradient_clip)
+                scaler.step(optimizer)
+                scaler.update()
+
+                running_loss += loss.item()
+                global_step += 1
+
+                if global_step % print_every == 0:
+                    avg = running_loss / print_every
+                    print(f"Epoch {epoch} step {global_step}: avg_loss={avg:.4f}")
+                    running_loss = 0.0
+                    
+
+        # save 
+        if save_dir is not None:
+            model.save("checkpoints/simplellm.pt", tokenizer=tokenizer, step=global_step)
+
+        print("Training complete")
+
+    def save(self, path: str, tokenizer: Optional[SimpleTokenizer] = None, optimizer: Optional[torch.optim.Optimizer] = None, step: Optional[int] = None):
+        """
+        Save model state, optionally tokenizer and optimizer.
+        """
+        ckpt = {
+            "model_state": self.state_dict(),
+        }
+        if tokenizer is not None:
+            ckpt["tokenizer"] = tokenizer.vocab
+        if optimizer is not None:
+            ckpt["optimizer_state"] = optimizer.state_dict()
+        if step is not None:
+            ckpt["step"] = step
+
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        torch.save(ckpt, path)
+        print(f"Saved model checkpoint to {path}")
+
+    @classmethod
+    def load(cls, path: str, **model_kwargs):
+        """
+        Load a model from a checkpoint file.
+        `model_kwargs` are passed to the model constructor.
+        Returns: model instance, optionally tokenizer dict if present
+        """
+        ckpt = torch.load(path, map_location="cpu")
+        model = cls(**model_kwargs)
+        model.load_state_dict(ckpt["model_state"])
+        tokenizer_vocab = ckpt.get("tokenizer", None)
+        print(f"Loaded model from {path}")
+        return model, tokenizer_vocab
+
+
+# -------------------- Example usage --------------------
+if __name__ == "__main__":
+    PATH_FOLDER = Path(r"C:/Users/alexander.zainoun/Desktop/LLM")
+    
+    # tiny smoke test
+    texts = load_texts_from_path(PATH_FOLDER/"my_book.txt", split_mode="paragraph")
+    print(f"Loaded {len(texts)} paragraphs")
+
+    tokenizer = SimpleTokenizer(do_lower=True)
+
+    tokenizer.build_vocab(texts, max_vocab=100000, min_freq=1)
+    print(f"Size vocab : {len(tokenizer.vocab)}")
+    ds = TextDataset(texts, tokenizer, seq_len=16, stride=8)
+
+    model = SimpleLLM(vocab_size=len(tokenizer.vocab), d_model=256, n_heads=4, d_ff=512, n_layers=6, n_experts=2, moe_k=1)
+    model.train_model(texts=texts, tokenizer=tokenizer, epochs=5, batch_size=32, lr=1e-4, seq_len=32, save_dir=PATH_FOLDER /"checkpoints", print_every=50, use_amp=False)
+
+    # Load later
+    # model, vocab = SimpleLLM.load("checkpoints/simplellm.pt", vocab_size=len(tokenizer.vocab), d_model=256, n_heads=4, d_ff=512, n_layers=6, n_experts=4, moe_k=2)
+
+    # generate
+    seed = torch.tensor([tokenizer.encode("I am ")], dtype=torch.long)
+    out = model.generate(seed, max_new_tokens=50)
+    print("generated ids:", out.tolist())
+    print("decoded:", tokenizer.decode(out[0].tolist()))
+
+    
