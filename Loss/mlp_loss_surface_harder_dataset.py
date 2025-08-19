@@ -15,11 +15,11 @@ from loss_class import LossVisualization
 # CONFIG - modifie ici
 # -------------------------
 SEED = 42
-HIDDEN = 32            # taille de la couche cachée
+HIDDEN = 256            # taille de la couche cachée
 LR = 1e-3
 EPOCHS = 1000
-GRID_N = 120
-RADIUS = 10.0           # échelle des directions (zoom)
+GRID_N = 220
+RADIUS = 150.0           # échelle des directions (zoom)
 SURFACE_CMAP = 'terrain'   # colormap pour la surface 3D
 CONTOUR_CMAP = 'terrain'   # colormap pour le contour
 TRAJECTORY_COLOR = 'black'
@@ -61,6 +61,14 @@ class SimpleMLP(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, hidden),
             nn.ReLU(),
             nn.Linear(hidden, 2*hidden),
             nn.ReLU(),

@@ -18,221 +18,20 @@ import os
 import re
 import json
 import random
-from collections import Counter
+from collections import Counter, defaultdict
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
-
-def load_texts_from_path(path: str, encoding: str = 'utf-8', split_mode: str = 'paragraph', *, min_chars: int = 1, max_chars: Optional[int] = None, recursive: bool = False) -> List[str]:
-    """
-    Load text(s) from a file path, directory, or glob pattern and return a list of text segments.
-
-    Parameters
-    ----------
-    path : str
-        Path to a single .txt file, a directory containing .txt files, or a glob pattern (e.g. "data/*.txt").
-    encoding : str
-        File encoding used to read files (default 'utf-8').
-    split_mode : str
-        How to split file contents into texts. Options:
-        - 'paragraph' : split on blank lines (default)
-        - 'line'      : split on individual lines
-        - 'sentence'  : split on sentence boundaries using punctuation
-        - 'whole'     : return the entire file contents as one string
-    min_chars : int
-        Minimum number of characters for a text segment to be kept.
-    max_chars : Optional[int]
-        If provided, long segments will be chunked into pieces of at most max_chars characters.
-    recursive : bool
-        When `path` is a directory or a glob, search files recursively if True.
-
-    Returns
-    -------
-    List[str]
-        A list of text strings ready to be passed to the tokenizer or dataset builder.
-    """
-    p = Path(path)
-    files: List[Path] = []
-    if p.exists() and p.is_file():
-        files = [p]
-    elif p.exists() and p.is_dir():
-        files = list(p.rglob("*.txt")) if recursive else list(p.glob("*.txt"))
-    else:
-        # treat as glob pattern
-        import glob
-        matches = glob.glob(path, recursive=recursive)
-        files = [Path(m) for m in matches]
-
-    texts: List[str] = []
-    for fp in files:
-        try:
-            raw = fp.read_text(encoding=encoding)
-        except Exception:
-            # skip files we can't read
-            continue
-        # normalize newlines
-        raw = raw.replace("\r\n", "\n").replace("\r", "\n").strip()
-        if not raw:
-            continue
-
-        if split_mode == 'line':
-            parts = [ln.strip() for ln in raw.split('\n') if ln.strip()]
-        elif split_mode == 'paragraph':
-            parts = [p.strip() for p in re.split(r"\n\s*\n", raw) if p.strip()]
-        elif split_mode == 'sentence':
-            parts = [s.strip() for s in re.split(r'(?<=[.!?])\s+', raw) if s.strip()]
-        elif split_mode == 'whole':
-            parts = [raw]
-        else:
-            raise ValueError(f"Unknown split_mode: {split_mode}")
-
-        for part in parts:
-            if max_chars is not None and len(part) > max_chars:
-                # naive chunking: cut into fixed-size pieces (preserves characters, not tokens)
-                start = 0
-                while start < len(part):
-                    chunk = part[start : start + max_chars].strip()
-                    if len(chunk) >= min_chars:
-                        texts.append(chunk)
-                    start += max_chars
-            else:
-                if len(part) >= min_chars:
-                    texts.append(part)
-
-    return texts
+from dataset import TextDataset
+from tokenizer import SimpleTokenizer
+from utils import load_texts_from_path
 
 
 
-# -------------------- Tokenizer --------------------
-class SimpleTokenizer:
-    """A minimal tokenizer for experimentation.
 
-    Behavior:
-    - Lowercases text (configurable)
-    - Splits on whitespace and punctuation
-    - Builds a vocabulary from training texts with a min frequency and max vocab size
-    - Provides encode/decode, save/load
-
-    This is intentionally simple — for production use HuggingFace tokenizers or sentencepiece.
-    """
-
-    _split_re = re.compile(r"(\w+|[^\w\s])", flags=re.UNICODE)
-
-    def __init__(self, do_lower: bool = True, unk_token: str = "<unk>", pad_token: str = "<pad>"):
-        self.do_lower = do_lower
-        self.unk_token = unk_token
-        self.pad_token = pad_token
-
-        self.vocab = {}            # token -> id
-        self.id_to_token = {}      # id -> token
-        self.frozen = False
-
-    def tokenize(self, text: str) -> List[str]:
-        if self.do_lower:
-            text = text.lower()
-        tokens = self._split_re.findall(text)
-        return tokens
-
-    def build_vocab(self, texts: Iterable[str], max_vocab: int = 30000, min_freq: int = 2):
-        if self.frozen:
-            raise RuntimeError("vocab already built/frozen")
-        counter = Counter()
-        for t in texts:
-            counter.update(self.tokenize(t))
-        # keep tokens above min_freq
-        items = [(tok, freq) for tok, freq in counter.items() if freq >= min_freq]
-        items.sort(key=lambda x: (-x[1], x[0]))
-        # reserve ids for special tokens
-        vocab_list = [self.pad_token, self.unk_token] + [tok for tok, _ in items[: max_vocab - 2]]
-        self.vocab = {tok: i for i, tok in enumerate(vocab_list)}
-        self.id_to_token = {i: tok for tok, i in self.vocab.items()}
-        self.frozen = True
-
-    def encode(self, text: str, add_eos: bool = False) -> List[int]:
-        tokens = self.tokenize(text)
-        ids = [self.vocab.get(t, self.vocab.get(self.unk_token)) for t in tokens]
-        if add_eos:
-            ids.append(self.vocab.get(self.unk_token))
-        return ids
-
-    def decode(self, ids: List[int]) -> str:
-        tokens = [self.id_to_token.get(i, self.unk_token) for i in ids]
-        return "".join(self._reconstruct_spacing(tokens))
-
-    def _reconstruct_spacing(self, tokens: List[str]) -> List[str]:
-        # join tokens inserting spaces between alphanumeric tokens and where appropriate
-        out = []
-        prev_was_word = False
-        for t in tokens:
-            if re.match(r"^\w+$", t):
-                if prev_was_word:
-                    out.append(" ")
-                out.append(t)
-                prev_was_word = True
-            else:
-                out.append(t)
-                prev_was_word = False
-        return out
-
-    def save(self, path: str):
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump({
-                "do_lower": self.do_lower,
-                "unk_token": self.unk_token,
-                "pad_token": self.pad_token,
-                "vocab": self.vocab,
-            }, f, ensure_ascii=False, indent=2)
-
-    @classmethod
-    def load(cls, path: str):
-        with open(path, "r", encoding="utf-8") as f:
-            obj = json.load(f)
-        tk = cls(do_lower=obj.get("do_lower", True), unk_token=obj.get("unk_token", "<unk>"), pad_token=obj.get("pad_token", "<pad>"))
-        tk.vocab = obj["vocab"]
-        tk.id_to_token = {int(i): t for t, i in tk.vocab.items()}
-        tk.frozen = True
-        return tk
-
-
-# -------------------- Dataset --------------------
-class TextDataset(Dataset):
-    """Creates training examples from raw texts using a sliding window.
-
-    Each example is a sequence of token ids of length `seq_len`. If a text is longer than seq_len,
-    we create multiple examples by sliding with stride `stride`.
-    """
-
-    def __init__(self, texts: List[str], tokenizer: SimpleTokenizer, seq_len: int = 128, stride: int = 64):
-        if not tokenizer.frozen:
-            raise RuntimeError("tokenizer must have a built vocab")
-        self.seq_len = seq_len
-        self.tokenizer = tokenizer
-        self.examples = []  # list of lists (token ids)
-        for t in texts:
-            ids = tokenizer.encode(t)
-            if len(ids) == 0:
-                continue
-            if len(ids) <= seq_len:
-                self.examples.append(ids + [tokenizer.vocab[tokenizer.pad_token]] * (seq_len - len(ids)))
-            else:
-                i = 0
-                while i < len(ids):
-                    chunk = ids[i : i + seq_len]
-                    if len(chunk) < seq_len:
-                        chunk = chunk + [tokenizer.vocab[tokenizer.pad_token]] * (seq_len - len(chunk))
-                    self.examples.append(chunk)
-                    if i + seq_len >= len(ids):
-                        break
-                    i += stride
-
-    def __len__(self):
-        return len(self.examples)
-
-    def __getitem__(self, idx):
-        return torch.tensor(self.examples[idx], dtype=torch.long)
 
 
 # -------------------- Transformer & MoE --------------------
@@ -514,6 +313,49 @@ class SimpleLLM(nn.Module):
         tokenizer_vocab = ckpt.get("tokenizer", None)
         print(f"Loaded model from {path}")
         return model, tokenizer_vocab
+    
+    def count_parameters(self, trainable: bool = True) -> int:
+        """Return number of parameters (trainable if trainable=True)."""
+        if trainable:
+            return sum(p.numel() for p in self.parameters() if p.requires_grad)
+        return sum(p.numel() for p in self.parameters())
+    
+def parameter_summary(model: nn.Module, trainable: bool = True, top_level: bool = True, unique: bool = True):
+    """
+    Print and return a summary dict {group_name: count}.
+    - top_level: group by the first name component before '.' (e.g. 'layers', 'token_emb', 'lm_head')
+    - unique: avoid double-counting shared Parameter objects
+    """
+    seen = set()
+    groups = defaultdict(int)
+    total = 0
+
+    for name, p in model.named_parameters():
+        if unique:
+            if id(p) in seen:
+                continue
+            seen.add(id(p))
+
+        if trainable and not p.requires_grad:
+            continue
+
+        if top_level:
+            group = name.split('.')[0]
+        else:
+            group = name  # no grouping
+
+        n = p.numel()
+        groups[group] += n
+        total += n
+
+    # sort groups by size
+    sorted_groups = sorted(groups.items(), key=lambda x: -x[1])
+    for g, c in sorted_groups:
+        print(f"{g:20s} : {c:,} params ({c/1e6:.3f} M)")
+
+    print("-" * 40)
+    print(f"Total params (trainable={trainable}, unique={unique}): {total:,} ({total/1e6:.3f} M)")
+    return dict(groups)
 
 
 # -------------------- Example usage --------------------
@@ -521,20 +363,25 @@ if __name__ == "__main__":
     PATH_FOLDER = Path(r"C:/Users/alexander.zainoun/Documents/GitHub/AI-project/LLM")
     
     # tiny smoke test
-    texts = load_texts_from_path(PATH_FOLDER/"my_book.txt", split_mode="paragraph")
+    texts = load_texts_from_path(PATH_FOLDER/"my_little_book.txt", split_mode="paragraph")
     print(f"Loaded {len(texts)} paragraphs")
 
     tokenizer = SimpleTokenizer(do_lower=True)
 
     tokenizer.build_vocab(texts, max_vocab=100000, min_freq=1)
+    tokenizer.save(PATH_FOLDER/"tokens.json")
     print(f"Size vocab : {len(tokenizer.vocab)}")
     ds = TextDataset(texts, tokenizer, seq_len=16, stride=8)
 
-    model = SimpleLLM(vocab_size=len(tokenizer.vocab), d_model=256, n_heads=4, d_ff=512, n_layers=6, n_experts=2, moe_k=1)
-    model.train_model(texts=texts, tokenizer=tokenizer, epochs=5, batch_size=64, lr=1e-4, seq_len=32, save_dir=PATH_FOLDER /"checkpoints", print_every=50, use_amp=False)
+    model = SimpleLLM(vocab_size=len(tokenizer.vocab), d_model=256, n_heads=8, d_ff=512, n_layers=4, n_experts=2, moe_k=1)
+    
+    summary = parameter_summary(model, trainable=True, top_level=True, unique=True)
+    
+    model.train_model(texts=texts, tokenizer=tokenizer, epochs=20, batch_size=32, lr=1e-4, seq_len=32, save_dir=PATH_FOLDER /"checkpoints", print_every=50, use_amp=False)
 
     # Load later
     # model, vocab = SimpleLLM.load("checkpoints/simplellm.pt", vocab_size=len(tokenizer.vocab), d_model=256, n_heads=4, d_ff=512, n_layers=6, n_experts=4, moe_k=2)
+    # tokenizer = SimpleTokenizer.load(PATH_FOLDER/"tokens.json")
 
     # generate
     seed = torch.tensor([tokenizer.encode("I am ")], dtype=torch.long)
