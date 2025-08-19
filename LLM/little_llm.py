@@ -518,7 +518,7 @@ class SimpleLLM(nn.Module):
 
 # -------------------- Example usage --------------------
 if __name__ == "__main__":
-    PATH_FOLDER = Path(r"C:/Users/alexander.zainoun/Desktop/LLM")
+    PATH_FOLDER = Path(r"C:/Users/alexander.zainoun/Documents/GitHub/AI-project/LLM")
     
     # tiny smoke test
     texts = load_texts_from_path(PATH_FOLDER/"my_book.txt", split_mode="paragraph")
@@ -531,7 +531,7 @@ if __name__ == "__main__":
     ds = TextDataset(texts, tokenizer, seq_len=16, stride=8)
 
     model = SimpleLLM(vocab_size=len(tokenizer.vocab), d_model=256, n_heads=4, d_ff=512, n_layers=6, n_experts=2, moe_k=1)
-    model.train_model(texts=texts, tokenizer=tokenizer, epochs=5, batch_size=32, lr=1e-4, seq_len=32, save_dir=PATH_FOLDER /"checkpoints", print_every=50, use_amp=False)
+    model.train_model(texts=texts, tokenizer=tokenizer, epochs=5, batch_size=64, lr=1e-4, seq_len=32, save_dir=PATH_FOLDER /"checkpoints", print_every=50, use_amp=False)
 
     # Load later
     # model, vocab = SimpleLLM.load("checkpoints/simplellm.pt", vocab_size=len(tokenizer.vocab), d_model=256, n_heads=4, d_ff=512, n_layers=6, n_experts=4, moe_k=2)
