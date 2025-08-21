@@ -84,16 +84,16 @@ model = SimpleMLP()
 # -------------------------
 # utilitaires pour vectoriser / fixer les paramètres
 # -------------------------
-def get_param_vector(m):
+def get_param_vector(model):
     vecs = []
-    for p in m.parameters():
+    for p in model.parameters():
         vecs.append(p.detach().cpu().view(-1))
     return torch.cat(vecs)
 
 
-def set_param_vector(m, vec):
+def set_param_vector(model, vec):
     pointer = 0
-    for p in m.parameters():
+    for p in model.parameters():
         numel = p.numel()
         p.data.copy_(vec[pointer:pointer+numel].view_as(p))
         pointer += numel
