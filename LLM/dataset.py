@@ -5,7 +5,7 @@ from typing import List
 import torch
 from torch.utils.data import Dataset
 
-from tokenizer import SimpleTokenizer
+from tokenizer import Tokenizer
 
 
 class TextDataset(Dataset):
@@ -15,7 +15,7 @@ class TextDataset(Dataset):
     we create multiple examples by sliding with stride `stride`.
     """
 
-    def __init__(self, texts: List[str], tokenizer: SimpleTokenizer, seq_len: int = 128, stride: int = 64):
+    def __init__(self, texts: List[str], tokenizer: Tokenizer, seq_len: int = 128, stride: int = 64):
         if not tokenizer.frozen:
             raise RuntimeError("tokenizer must have a built vocab")
         self.seq_len = seq_len

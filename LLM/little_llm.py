@@ -26,7 +26,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 from dataset import TextDataset
-from tokenizer import SimpleTokenizer
+from tokenizer import Tokenizer
 from utils import load_texts_from_path
 
 
@@ -205,7 +205,7 @@ class SimpleLLM(nn.Module):
     def train_model(self,
                     texts: Optional[List[str]] = None,
                     dataset: Optional[TextDataset] = None,
-                    tokenizer: Optional[SimpleTokenizer] = None,
+                    tokenizer: Optional[Tokenizer] = None,
                     epochs: int = 3,
                     batch_size: int = 16,
                     lr: float = 5e-5,
@@ -282,7 +282,7 @@ class SimpleLLM(nn.Module):
 
         print("Training complete")
 
-    def save(self, path: str, tokenizer: Optional[SimpleTokenizer] = None, optimizer: Optional[torch.optim.Optimizer] = None, step: Optional[int] = None):
+    def save(self, path: str, tokenizer: Optional[Tokenizer] = None, optimizer: Optional[torch.optim.Optimizer] = None, step: Optional[int] = None):
         """
         Save model state, optionally tokenizer and optimizer.
         """
@@ -366,12 +366,13 @@ if __name__ == "__main__":
     texts = load_texts_from_path(PATH_FOLDER/"my_little_book.txt", split_mode="paragraph")
     print(f"Loaded {len(texts)} paragraphs")
 
-    tokenizer = SimpleTokenizer(do_lower=True)
+    tokenizer = Tokenizer(do_lower=True, vocab_mode="word")
 
     tokenizer.build_vocab(texts, max_vocab=100000, min_freq=1)
     tokenizer.save(PATH_FOLDER/"tokens.json")
     print(f"Size vocab : {len(tokenizer.vocab)}")
-    ds = TextDataset(texts, tokenizer, seq_len=16, stride=8)
+    ds = TextDataset(texts, tokenizer, seq_len=32, stride=8)
+    print(f"Loaded {len(ds)} examples")
 
     model = SimpleLLM(vocab_size=len(tokenizer.vocab), d_model=256, n_heads=8, d_ff=512, n_layers=4, n_experts=2, moe_k=1)
     
