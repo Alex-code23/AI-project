@@ -20,6 +20,8 @@ import json
 import random
 from collections import Counter, defaultdict
 
+from matplotlib import pyplot as plt
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -107,9 +109,10 @@ class MoE(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch, seq, d = x.shape
-        logits = self.gate(x)
-        probs = F.softmax(logits, dim=-1)
+        logits = self.gate(x)               # [batch, seq, n_experts]
+        probs = F.softmax(logits, dim=-1)   # [batch, seq, n_experts]
         if self.k < self.n_experts:
+            # Sélection des k meilleurs experts
             topk_vals, topk_idx = torch.topk(probs, self.k, dim=-1)
             mask = torch.zeros_like(probs)
             mask.scatter_(-1, topk_idx, 1.0)
@@ -119,12 +122,14 @@ class MoE(nn.Module):
             probs = probs / denom
         expert_outputs = []
         for expert in self.experts:
+            # Chaque expert traite l’entrée entière (même si son poids est 0).
             expert_outputs.append(expert(x))
-        expert_stack = torch.stack(expert_outputs, dim=0).permute(1, 2, 0, 3)
-        probs_expanded = probs.unsqueeze(-1)
+        expert_stack = torch.stack(expert_outputs, dim=0)   # [n_experts, batch, seq, d_model]
+        expert_stack = expert_stack.permute(1, 2, 0, 3)     # [batch, seq, n_experts, d_model]
+        probs_expanded = probs.unsqueeze(-1)        #  [batch, seq, n_experts, 1]
         moe_out = torch.sum(probs_expanded * expert_stack, dim=2)
         moe_out = self.dropout(moe_out)
-        return moe_out
+        return moe_out      #  [batch, seq, d_model]
 
 
 class TransformerBlock(nn.Module):
@@ -155,7 +160,7 @@ def build_causal_mask(seq_len: int, device: torch.device) -> torch.Tensor:
 
 
 class SimpleLLM(nn.Module):
-    def __init__(self, vocab_size: int, d_model: int = 512, n_heads: int = 8, d_ff: int = 2048, n_layers: int = 6,
+    def __init__(self, vocab_size: int, d_model: int = 512, n_heads: int = 8, d_ff: int = 2048, n_layers: int = 12,
                  max_seq_len: int = 1024, dropout: float = 0.1, moe_every: int = 2, n_experts: int = 6, moe_k: int = 2):
         super().__init__()
         self.vocab_size = vocab_size
@@ -240,6 +245,11 @@ class SimpleLLM(nn.Module):
         scaler = torch.amp.GradScaler(device = device ,enabled=(use_amp and device.type == "cuda"))
         global_step = 0
 
+        # metrics to plot
+        metrics = {}
+        metrics["training_loss"] = []
+        metrics["next_epoch"] = []
+
         if save_dir is not None:
             os.makedirs(save_dir, exist_ok=True)
 
@@ -270,11 +280,28 @@ class SimpleLLM(nn.Module):
                 running_loss += loss.item()
                 global_step += 1
 
+                
                 if global_step % print_every == 0:
+                    # add new values metrics 
+                    metrics["training_loss"].append(running_loss)
+
                     avg = running_loss / print_every
                     print(f"Epoch {epoch} step {global_step}: avg_loss={avg:.4f}")
-                    running_loss = 0.0
-                    
+                    running_loss = 0  
+
+            metrics["next_epoch"].append(global_step)
+            # metrics        
+            # saving plot
+            self.figure_training(metrics, save_dir=save_dir, print_every=print_every)
+
+            print("="*40)
+            print(f"test epoch: {epoch}")
+            seed = torch.tensor([tokenizer.encode("A ready banquet on the turf")], dtype=torch.long)
+            out = model.generate(seed, max_new_tokens=50)
+            print("generated ids:", out.tolist())
+            print("decoded:", tokenizer.decode(out[0].tolist()))
+            print("="*40)
+                             
 
         # save 
         if save_dir is not None:
@@ -320,6 +347,53 @@ class SimpleLLM(nn.Module):
             return sum(p.numel() for p in self.parameters() if p.requires_grad)
         return sum(p.numel() for p in self.parameters())
     
+    def figure_training(self, metrics:dict, save_dir:str, print_every:int):
+        training_loss = metrics["training_loss"]
+        next_epoch = metrics["next_epoch"]
+
+        fig, axes = plt.subplots(1, 1, figsize=(12, 8))
+
+        ax = axes
+        ax.plot(
+            np.linspace(0,len(training_loss)*print_every, len(training_loss) ),
+            training_loss,
+            "-o",                # ligne + points
+            markersize=4,
+            linewidth=1,
+            label="training_loss per episode"
+        )
+
+        size_window = 3
+        ma = moving_average(training_loss, window=size_window)
+        if ma.size > 0:
+            ax.plot(np.linspace(0,len(ma)*print_every,len(ma) ) + (size_window - 1), 
+                    ma, label="Moving average (10)", linewidth=2)
+
+        for step in next_epoch:
+            ax.axvline(x=step, color="red", linestyle="--", alpha=0.7, label="Epoch boundary")
+
+        # éviter répétition de légende si plusieurs epochs
+        handles, labels = ax.get_legend_handles_labels()
+        unique = dict(zip(labels, handles))
+        ax.legend(unique.values(), unique.keys())
+
+        ax.set_xlabel("Steps")
+        ax.set_ylabel("training_loss")
+        ax.set_yscale("log")
+        ax.set_title("training_loss per step")
+        ax.grid(True)
+
+        plt.tight_layout()
+        plt.savefig(save_dir/"test.png")
+        plt.close()
+
+
+def moving_average(x, window):
+    if len(x) < 1:
+        return np.array([])
+    window = max(1, int(window))
+    return np.convolve(x, np.ones(window)/window, mode='valid')
+    
 def parameter_summary(model: nn.Module, trainable: bool = True, top_level: bool = True, unique: bool = True):
     """
     Print and return a summary dict {group_name: count}.
@@ -360,7 +434,7 @@ def parameter_summary(model: nn.Module, trainable: bool = True, top_level: bool 
 
 # -------------------- Example usage --------------------
 if __name__ == "__main__":
-    PATH_FOLDER = Path(r"C:/Users/alexander.zainoun/Documents/GitHub/AI-project/LLM")
+    PATH_FOLDER = Path(r"C:/Users/alexa/Documents/GitHub/AI-project/LLM")
     
     # tiny smoke test
     texts = load_texts_from_path(PATH_FOLDER/"my_little_book.txt", split_mode="paragraph")
@@ -374,18 +448,20 @@ if __name__ == "__main__":
     ds = TextDataset(texts, tokenizer, seq_len=32, stride=8)
     print(f"Loaded {len(ds)} examples")
 
-    model = SimpleLLM(vocab_size=len(tokenizer.vocab), d_model=256, n_heads=8, d_ff=512, n_layers=4, n_experts=2, moe_k=1)
+    model = SimpleLLM(vocab_size=len(tokenizer.vocab), d_model=256, n_heads=8, d_ff=512, n_layers=10, n_experts=6, moe_k=2)
     
     summary = parameter_summary(model, trainable=True, top_level=True, unique=True)
     
-    model.train_model(texts=texts, tokenizer=tokenizer, epochs=20, batch_size=32, lr=1e-4, seq_len=32, save_dir=PATH_FOLDER /"checkpoints", print_every=50, use_amp=False)
+    model.train_model(texts=texts, tokenizer=tokenizer, epochs=30, batch_size=32, lr=1e-4, seq_len=32, save_dir=PATH_FOLDER, print_every=10, use_amp=False)
 
     # Load later
     # model, vocab = SimpleLLM.load("checkpoints/simplellm.pt", vocab_size=len(tokenizer.vocab), d_model=256, n_heads=4, d_ff=512, n_layers=6, n_experts=4, moe_k=2)
     # tokenizer = SimpleTokenizer.load(PATH_FOLDER/"tokens.json")
 
     # generate
-    seed = torch.tensor([tokenizer.encode("I am ")], dtype=torch.long)
+    print("="*40)
+    print("Final test")
+    seed = torch.tensor([tokenizer.encode("A ready banquet on the turf")], dtype=torch.long)
     out = model.generate(seed, max_new_tokens=50)
     print("generated ids:", out.tolist())
     print("decoded:", tokenizer.decode(out[0].tolist()))

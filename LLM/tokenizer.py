@@ -335,7 +335,7 @@ if __name__ == "__main__":
     ]
 
     tok = Tokenizer(do_lower=True, strip_accents=False, vocab_mode="bpe", debug=True)
-    tok.build_vocab(texts, max_vocab=200, min_freq=1)
+    tok.build_vocab(texts, max_vocab=200, min_freq=1, num_merges=20)
     print("Vocab size:", len(tok.vocab))
     print(f"Vocabulary : {tok.vocab}")
     s = "Hello, café!"
