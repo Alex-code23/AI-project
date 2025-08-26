@@ -175,7 +175,7 @@ ax1.grid(True)
 # ax2.grid(True)
 
 # ---- Moving average + confidence interval pour record_lengths ----
-ma_lengths, ci_low, ci_high = moving_average_with_ci(record_lengths, w=25)
+ma_lengths, ci_low, ci_high = moving_average_with_ci(record_lengths, w=55)
 ax2.plot(record_lengths, label='Episode length', linewidth=0.8, alpha=0.1)
 ax2.plot(ma_lengths, label='Moving average length (w=25)', linewidth=2, color='C1')
 ax2.fill_between(range(len(ma_lengths)), ci_low, ci_high, color='C2', alpha=0.6, label='95% CI')
@@ -203,12 +203,11 @@ ax3.grid(True)
 # ax4.legend(ncol=2, fontsize=5)
 # ax4.grid(True)
 
-# ---- Plot avec bande de confiance ----
+# Plot avec bande de confiance 
 for s in range(n_states):
     ma, ci_low, ci_high = moving_average_with_ci(record_probs[:, s, 1], w=55)
     ax4.plot(ma, label=f'State {s}')  # moyenne glissante
     ax4.fill_between(range(len(ma)), ci_low, ci_high, alpha=0.8)  # bande CI
-
 ax4.set_xlabel('Episode', fontsize=5)
 ax4.set_ylabel('P(stay put)', fontsize=5)
 ax4.set_title('Probability of choosing "stay put" by state', fontsize=13)
