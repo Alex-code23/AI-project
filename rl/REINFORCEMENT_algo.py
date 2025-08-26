@@ -131,6 +131,25 @@ def moving_average(x, w=25):
         return np.convolve(x, np.ones(len(x))/len(x), mode='same')
     return np.convolve(x, np.ones(w)/w, mode='same')
 
+# ---- Utilities: moving averages + confidence interval ----
+def moving_average_with_ci(x, w=25, ci=2.56):
+    """Retourne la moyenne glissante et l'intervalle de confiance à 95%"""
+    ma = []
+    ci_low, ci_high = [], []
+    for i in range(len(x)):
+        if i < w:
+            window = x[:i+1]
+        else:
+            window = x[i-w+1:i+1]
+        mean = np.mean(window)
+        std = np.std(window)
+        # erreur standard = std/sqrt(n)
+        sem = std / np.sqrt(len(window))
+        ma.append(mean)
+        ci_low.append(mean - ci * sem)
+        ci_high.append(mean + ci * sem)
+    return np.array(ma), np.array(ci_low), np.array(ci_high)
+
 ma_returns = moving_average(record_returns, w=25)
 ma_lengths = moving_average(record_lengths, w=25)
 
@@ -147,8 +166,19 @@ ax1.legend(fontsize=5)
 ax1.grid(True)
 
 # Plot 2: Episode length per episode (top-right)
-ax2.plot(record_lengths, label='Episode length', linewidth=0.8)
-ax2.plot(ma_lengths, label='Moving average length (w=25)', linewidth=2)
+# ax2.plot(record_lengths, label='Episode length', linewidth=0.8)
+# ax2.plot(ma_lengths, label='Moving average length (w=25)', linewidth=2)
+# ax2.set_xlabel('Episode', fontsize=5)
+# ax2.set_ylabel('Episode length (timesteps)', fontsize=5)
+# ax2.set_title('Episode length evolution', fontsize=13)
+# ax2.legend(fontsize=5)
+# ax2.grid(True)
+
+# ---- Moving average + confidence interval pour record_lengths ----
+ma_lengths, ci_low, ci_high = moving_average_with_ci(record_lengths, w=25)
+ax2.plot(record_lengths, label='Episode length', linewidth=0.8, alpha=0.1)
+ax2.plot(ma_lengths, label='Moving average length (w=25)', linewidth=2, color='C1')
+ax2.fill_between(range(len(ma_lengths)), ci_low, ci_high, color='C2', alpha=0.6, label='95% CI')
 ax2.set_xlabel('Episode', fontsize=5)
 ax2.set_ylabel('Episode length (timesteps)', fontsize=5)
 ax2.set_title('Episode length evolution', fontsize=13)
@@ -165,13 +195,27 @@ ax3.legend(ncol=2, fontsize=5)
 ax3.grid(True)
 
 # Plot 4: Probability of choosing "stay put" by state (bottom-right)
+# for s in range(n_states):
+#     ax4.plot(record_probs[:, s, 1], label=f'State {s}')
+# ax4.set_xlabel('Episode', fontsize=5)
+# ax4.set_ylabel('P(stay put)', fontsize=5)
+# ax4.set_title('Probability of choosing "stay put" by state', fontsize=13)
+# ax4.legend(ncol=2, fontsize=5)
+# ax4.grid(True)
+
+# ---- Plot avec bande de confiance ----
 for s in range(n_states):
-    ax4.plot(record_probs[:, s, 1], label=f'State {s}')
+    ma, ci_low, ci_high = moving_average_with_ci(record_probs[:, s, 1], w=55)
+    ax4.plot(ma, label=f'State {s}')  # moyenne glissante
+    ax4.fill_between(range(len(ma)), ci_low, ci_high, alpha=0.8)  # bande CI
+
 ax4.set_xlabel('Episode', fontsize=5)
 ax4.set_ylabel('P(stay put)', fontsize=5)
 ax4.set_title('Probability of choosing "stay put" by state', fontsize=13)
 ax4.legend(ncol=2, fontsize=5)
 ax4.grid(True)
+
+
 
 # Plot 5: Theta logits for action "left" by state (bottom-left)
 for s in range(n_states):
