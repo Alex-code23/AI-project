@@ -81,9 +81,9 @@ if __name__ == "__main__":
     
     summary = parameter_summary(model, trainable=True, top_level=True, unique=True)
     
-    # model.train_model(dataset=ds, tokenizer=tokenizer, epochs=1, batch_size=64, lr=1e-4, seq_len=32, save_dir=PATH_FOLDER, print_every=10, use_amp=False)
-    # model.train_with_cot(examples, tokenizer, epochs=10, batch_size=4, seq_len=64, mask_rationale=True, lr=1e-4, print_every=20)
-    model.train_with_cot_rl(examples, tokenizer, reward_fn=reward_exact_match, epochs=10, batch_size=4, lr=1e-4, print_every=20)
+    model.train_model(dataset=ds, tokenizer=tokenizer, epochs=1, batch_size=64, lr=1e-4, seq_len=32, save_dir=PATH_FOLDER, print_every=10, use_amp=False)
+    model.train_with_cot(examples, tokenizer, epochs=10, batch_size=4, seq_len=64, mask_rationale=True, lr=1e-4, print_every=20)
+    # model.train_with_cot_rl(examples, tokenizer, reward_fn=reward_exact_match, epochs=10, batch_size=4, lr=1e-4, print_every=20)
 
     # Load later
     # model, vocab = SimpleLLM.load("checkpoints/simplellm.pt", vocab_size=len(tokenizer.vocab), d_model=256, n_heads=4, d_ff=512, n_layers=6, n_experts=4, moe_k=2)

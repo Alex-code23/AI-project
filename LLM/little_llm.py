@@ -318,7 +318,7 @@ class SimpleLLM(nn.Module):
             print("="*40)
             print(f"test epoch: {epoch}")
             seed = torch.tensor([tokenizer.encode("A ready banquet on the turf")], dtype=torch.long)
-            out = model.generate(seed, max_new_tokens=50)
+            out = self.generate(seed, max_new_tokens=50)
             print("generated ids:", out.tolist())
             print("decoded:", tokenizer.decode(out[0].tolist()))
             print("="*40)
@@ -326,7 +326,7 @@ class SimpleLLM(nn.Module):
 
         # save 
         if save_dir is not None:
-            model.save("checkpoints/simplellm.pt", tokenizer=tokenizer, step=global_step)
+            self.save("checkpoints/simplellm.pt", tokenizer=tokenizer, step=global_step)
 
         print("Training complete")
 
