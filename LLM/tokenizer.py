@@ -45,7 +45,7 @@ class Tokenizer:
 
     def __init__(
         self,
-        do_lower: bool = True,
+        do_lower: bool = False,
         unk_token: str = "<unk>",
         pad_token: str = "<pad>",
         strip_accents: bool = False,
