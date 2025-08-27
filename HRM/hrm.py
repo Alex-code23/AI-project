@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torchvision import datasets, transforms
 
 class LowLevelRNN(nn.Module):
     def __init__(self, dim):
@@ -17,11 +18,11 @@ class HighLevelRNN(nn.Module):
         return self.rnn(zH + zL)
 
 class HRM(nn.Module):
-    def __init__(self, dim):
+    def __init__(self, dim, output_dim):
         super().__init__()
         self.L = LowLevelRNN(dim)
         self.H = HighLevelRNN(dim)
-        self.output_head = nn.Linear(dim, 2)
+        self.output_head = nn.Linear(dim, output_dim)  # now matches MNIST
     
     def forward_cycle(self, x, zH, zL, T=3):
         # Fast updates for L, slow update for H
@@ -36,7 +37,7 @@ class HRM(nn.Module):
 
 if __name__ == "__main__":
     # Training loop with deep supervision
-    model = HRM(dim=16)
+    model = HRM(dim=16, output_dim=2)
     optimizer = optim.Adam(model.parameters(), lr=0.01)
     criterion = nn.CrossEntropyLoss()
 
