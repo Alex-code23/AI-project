@@ -1,6 +1,4 @@
 """
-DDPG-like minimal without gym + visualizations (matplotlib subplots) — English plots.
-
 Environment:
  - state : [position, velocity, target_position]
  - action : continuous acceleration in [-1, 1]
