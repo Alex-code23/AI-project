@@ -28,6 +28,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
+from torch.cuda.amp import GradScaler, autocast
 
 from cot_helpers import _mask_rationale_in_shift_labels, build_cot_texts, ensure_special_tokens
 from dataset import TextDataset
@@ -205,6 +206,7 @@ class SimpleLLM(nn.Module):
             pass
 
     def forward(self, input_ids: torch.LongTensor, attn_mask: Optional[torch.Tensor] = None):
+        input_ids = input_ids.to(self.token_emb.weight.device)
         x = self.token_emb(input_ids) * math.sqrt(self.d_model)
         x = self.pos_emb(x)
         for layer in self.layers:
@@ -263,7 +265,8 @@ class SimpleLLM(nn.Module):
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
         optimizer = torch.optim.AdamW(self.parameters(), lr=lr)
-        scaler = torch.amp.GradScaler(device = device ,enabled=(use_amp and device.type == "cuda"))
+
+        scaler = GradScaler(enabled=(use_amp and device.type == "cuda"))
         global_step = 0
 
         # metrics to plot
@@ -317,7 +320,7 @@ class SimpleLLM(nn.Module):
 
             print("="*40)
             print(f"test epoch: {epoch}")
-            seed = torch.tensor([tokenizer.encode("A ready banquet on the turf")], dtype=torch.long)
+            seed = torch.tensor([tokenizer.encode("He leaned his elbows")], dtype=torch.long, device=device)
             out = self.generate(seed, max_new_tokens=50)
             print("generated ids:", out.tolist())
             print("decoded:", tokenizer.decode(out[0].tolist()))
@@ -370,7 +373,7 @@ class SimpleLLM(nn.Module):
         optimizer = torch.optim.AdamW(self.parameters(), lr=lr)
 
         use_amp = train_kwargs.get("use_amp", False)
-        scaler = torch.amp.GradScaler(device=device, enabled=(use_amp and device.type == "cuda"))
+        scaler = GradScaler(enabled=(use_amp and device.type == "cuda"))
         global_step = 0
 
         self.train()
@@ -383,7 +386,7 @@ class SimpleLLM(nn.Module):
                 labels = input_ids.clone()
                 optimizer.zero_grad()
 
-                with torch.amp.autocast(device_type=device.type, enabled=(use_amp and device.type == "cuda")):
+                with autocast(enabled=(use_amp and device.type == "cuda")):
                     logits = self.forward(input_ids, attn_mask=attn_mask)
                     shift_logits = logits[:, :-1, :].contiguous()
                     shift_labels = labels[:, 1:].contiguous()
@@ -442,9 +445,7 @@ class SimpleLLM(nn.Module):
 
         # Activation optionnelle d'AMP (mixed precision) si demandé et supporté
         use_amp = train_kwargs.get("use_amp", False)
-        scaler = torch.amp.GradScaler(
-            device=device, enabled=(use_amp and device.type == "cuda")
-        )
+        scaler = GradScaler(enabled=(use_amp and device.type == "cuda"))
 
         global_step = 0  # Compteur global d'itérations (utile pour logs)
         self.train()     # Mode entraînement (dropout actif, etc.)
@@ -522,9 +523,7 @@ class SimpleLLM(nn.Module):
                 optimizer.zero_grad()  # Remise à zéro des gradients
 
                 # Autocast AMP (si activé) pour calculer la loss en half precision sur GPU
-                with torch.amp.autocast(
-                    device_type=device.type, enabled=(use_amp and device.type == "cuda")
-                ):
+                with autocast(device_type=device.type, enabled=(use_amp and device.type == "cuda")):
                     total_loss = batch_loss  # Ici la loss totale == loss RL (on pourrait mixer avec MLE)
 
                 # Check de débogage: la loss doit être connectée au graphe (=> requires_grad True)
@@ -736,10 +735,13 @@ def parameter_summary(model: nn.Module, trainable: bool = True, top_level: bool 
 
 # -------------------- Example usage --------------------
 if __name__ == "__main__":
-    PATH_FOLDER = Path(r"C:/Users/alexa/Documents/GitHub/AI-project/LLM")
+    PATH_FOLDER = Path(r"C:/Users/Alexander/Documents/GitHub/AI-project/LLM")
     
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    print(f"DEVICE : {device}")
     # tiny smoke test
-    texts = load_texts_from_path(PATH_FOLDER/"my_little_book.txt", split_mode="paragraph")
+    texts = load_texts_from_path(PATH_FOLDER/"my_book.txt", split_mode="paragraph")
     print(f"Loaded {len(texts)} paragraphs")
 
     tokenizer = Tokenizer(do_lower=True, vocab_mode="word")
@@ -750,11 +752,11 @@ if __name__ == "__main__":
     ds = TextDataset(texts, tokenizer, seq_len=32, stride=8)
     print(f"Loaded {len(ds)} examples")
 
-    model = SimpleLLM(vocab_size=len(tokenizer.vocab), d_model=256, n_heads=8, d_ff=512, n_layers=10, n_experts=6, moe_k=2)
+    model = SimpleLLM(vocab_size=len(tokenizer.vocab), d_model=512, n_heads=8, d_ff=512, n_layers=10, n_experts=6, moe_k=2)
     
     summary = parameter_summary(model, trainable=True, top_level=True, unique=True)
     
-    model.train_model(dataset=ds, tokenizer=tokenizer, epochs=30, batch_size=32, lr=1e-4, seq_len=32, save_dir=PATH_FOLDER, print_every=10, use_amp=False)
+    model.train_model(dataset=ds, tokenizer=tokenizer, epochs=30, batch_size=256, lr=1e-4, seq_len=32, save_dir=PATH_FOLDER, print_every=5, use_amp=False)
 
     # Load later
     # model, vocab = SimpleLLM.load("checkpoints/simplellm.pt", vocab_size=len(tokenizer.vocab), d_model=256, n_heads=4, d_ff=512, n_layers=6, n_experts=4, moe_k=2)
@@ -763,7 +765,7 @@ if __name__ == "__main__":
     # generate
     print("="*40)
     print("Final test")
-    seed = torch.tensor([tokenizer.encode("A ready banquet on the turf")], dtype=torch.long)
+    seed = torch.tensor([tokenizer.encode("He leaned his elbows")], dtype=torch.long, device=device)
     out = model.generate(seed, max_new_tokens=50)
     print("generated ids:", out.tolist())
     print("decoded:", tokenizer.decode(out[0].tolist()))

@@ -39,7 +39,7 @@ np.random.seed(0)
 theta = np.zeros((n_states, n_actions))    # logits par (état, action)
 alpha = 0.1
 gamma = 0.99
-n_episodes = 2000
+n_episodes = 5000
 
 print("Paramètres initiaux (theta) :")
 print(theta)

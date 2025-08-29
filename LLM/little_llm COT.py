@@ -36,7 +36,7 @@ from utils import load_texts_from_path
 
 # -------------------- Example --------------------
 if __name__ == "__main__":
-    PATH_FOLDER = Path(r"C:/Users/alexander.zainoun/Documents/GitHub/AI-project/LLM")
+    PATH_FOLDER = Path(r"C:/Users/Alexander/Documents/GitHub/AI-project/LLM")
     
     # tiny smoke test
     texts = load_texts_from_path(PATH_FOLDER/"my_little_book.txt", split_mode="paragraph")
