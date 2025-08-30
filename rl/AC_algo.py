@@ -234,6 +234,7 @@ def train():
             if total_steps < START_STEPS:
                 # random action
                 action = env.sample_action()
+                
             else:
                 obs_t = torch.as_tensor(obs, dtype=torch.float32, device=DEVICE).unsqueeze(0)
                 with torch.no_grad():
@@ -253,7 +254,7 @@ def train():
             obs = next_obs
             ep_reward += reward
 
-            # update
+            # update networks
             if buffer.size >= BATCH_SIZE:
                 batch = buffer.sample(BATCH_SIZE)
                 obs_b = batch["obs"]
