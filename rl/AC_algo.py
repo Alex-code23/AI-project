@@ -271,7 +271,7 @@ def train():
                 obs_t = torch.as_tensor(obs, dtype=torch.float32, device=DEVICE).unsqueeze(0)
                 with torch.no_grad():
                     action = actor(obs_t).cpu().numpy()[0]
-                action = action + np.random.normal(scale=NOISE_SCALE, size=act_dim)
+                action = action + np.random.normal(scale=NOISE_SCALE, size=act_dim) # exploration noise
                 action = np.clip(action, env.action_low, env.action_high)
 
             action_history.append(float(action[0]))
@@ -298,7 +298,7 @@ def train():
                 # critic update
                 with torch.no_grad():
                     next_actions = actor_target(next_obs_b)
-                    q_next = critic_target(next_obs_b, next_actions)
+                    q_next = critic_target(next_obs_b, next_actions) # Q(s', a') and not V(s') beacause buffer contains (s,a,s')
                     q_target = rews_b + GAMMA * (1.0 - done_b) * q_next
 
                 q_val = critic(obs_b, acts_b)
