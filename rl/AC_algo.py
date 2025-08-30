@@ -1,6 +1,4 @@
 """
-DDPG-like minimal without gym + visualizations (matplotlib subplots) — English plots.
-
 Environment:
  - state : [position, velocity, target_position]
  - action : continuous acceleration in [-1, 1]
@@ -24,7 +22,7 @@ import matplotlib.pyplot as plt
 # Hyperparameters
 # -----------------------
 SEED = 42
-MAX_EPISODES = 400
+MAX_EPISODES = 200
 MAX_STEPS = 250 
 BATCH_SIZE = 128
 BUFFER_CAPACITY = 100000
@@ -38,6 +36,29 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(SEED)
 random.seed(SEED)
 torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
+
+print(f"DEVICE: {DEVICE}")
+
+# ---- Utilities: moving averages + confidence interval ----
+def moving_average_with_ci(x, w=25, ci=2.56):
+    """Retourne la moyenne glissante et l'intervalle de confiance à 95%"""
+    ma = []
+    ci_low, ci_high = [], []
+    for i in range(len(x)):
+        if i < w:
+            window = x[:i+1]
+        else:
+            window = x[i-w+1:i+1]
+        mean = np.mean(window)
+        std = np.std(window)
+        # erreur standard = std/sqrt(n)
+        sem = std / np.sqrt(len(window))
+        ma.append(mean)
+        ci_low.append(mean - ci * sem)
+        ci_high.append(mean + ci * sem)
+    return np.array(ma), np.array(ci_low), np.array(ci_high)
 
 # -----------------------
 # Simple point environment
@@ -104,34 +125,46 @@ class SimplePointEnv:
 class ReplayBuffer:
     def __init__(self, obs_dim, act_dim, capacity=100000):
         self.capacity = capacity
-        self.obs_buf = np.zeros((capacity, obs_dim), dtype=np.float32)
-        self.next_obs_buf = np.zeros((capacity, obs_dim), dtype=np.float32)
-        self.act_buf = np.zeros((capacity, act_dim), dtype=np.float32)      # action
-        self.rew_buf = np.zeros((capacity, 1), dtype=np.float32)            # reward
-        self.done_buf = np.zeros((capacity, 1), dtype=np.float32)           # done
-        self.ptr = 0            # pointeur
-        self.size = 0           # actual size of our buffers
+        # store buffers as torch tensors directly on DEVICE
+        self.obs_buf = torch.zeros((capacity, obs_dim), dtype=torch.float32, device=DEVICE)
+        self.next_obs_buf = torch.zeros((capacity, obs_dim), dtype=torch.float32, device=DEVICE)
+        self.act_buf = torch.zeros((capacity, act_dim), dtype=torch.float32, device=DEVICE)
+        self.rew_buf = torch.zeros((capacity, 1), dtype=torch.float32, device=DEVICE)
+        self.done_buf = torch.zeros((capacity, 1), dtype=torch.float32, device=DEVICE)
+        self.ptr = 0
+        self.size = 0
 
     def add(self, obs, act, rew, next_obs, done):
-        # we delete previous one if it existed
         idx = self.ptr % self.capacity
-        self.obs_buf[idx] = obs
-        self.act_buf[idx] = act
-        self.rew_buf[idx] = rew
-        self.next_obs_buf[idx] = next_obs
-        self.done_buf[idx] = float(done)
+        # convert to tensors on DEVICE and copy into buffers
+        obs_t = torch.as_tensor(obs, dtype=torch.float32, device=DEVICE)
+        act_t = torch.as_tensor(act, dtype=torch.float32, device=DEVICE)
+        rew_t = torch.as_tensor([rew], dtype=torch.float32, device=DEVICE) if np.isscalar(rew) else torch.as_tensor(rew, dtype=torch.float32, device=DEVICE)
+        next_obs_t = torch.as_tensor(next_obs, dtype=torch.float32, device=DEVICE)
+        done_t = torch.as_tensor([float(done)], dtype=torch.float32, device=DEVICE)
+
+        # ensure shapes match (in case obs is 1D)
+        self.obs_buf[idx].copy_(obs_t.reshape(self.obs_buf.shape[1]))
+        self.act_buf[idx].copy_(act_t.reshape(self.act_buf.shape[1]))
+        # reward and done keep their 1-column shape
+        self.rew_buf[idx].copy_(rew_t.reshape(1))
+        self.next_obs_buf[idx].copy_(next_obs_t.reshape(self.next_obs_buf.shape[1]))
+        self.done_buf[idx].copy_(done_t.reshape(1))
+
         self.ptr += 1
         self.size = min(self.size + 1, self.capacity)
 
     def sample(self, batch_size):
-        # choosing our sample of BATCH SIZE
-        idxs = np.random.randint(0, self.size, size=batch_size)
+        # sample indices on DEVICE (fast)
+        # if buffer isn't filled enough, use current size
+        max_idx = max(1, self.size)
+        idxs = torch.randint(0, max_idx, (batch_size,), device=DEVICE, dtype=torch.long)
         batch = dict(
-            obs = torch.as_tensor(self.obs_buf[idxs], device=DEVICE),
-            acts = torch.as_tensor(self.act_buf[idxs], device=DEVICE),
-            rews = torch.as_tensor(self.rew_buf[idxs], device=DEVICE),
-            next_obs = torch.as_tensor(self.next_obs_buf[idxs], device=DEVICE),
-            done = torch.as_tensor(self.done_buf[idxs], device=DEVICE),
+            obs = self.obs_buf[idxs],
+            acts = self.act_buf[idxs],
+            rews = self.rew_buf[idxs],
+            next_obs = self.next_obs_buf[idxs],
+            done = self.done_buf[idxs],
         )
         return batch
 
@@ -224,15 +257,14 @@ def train():
     number_steps = []
 
     for ep in range(1, MAX_EPISODES + 1):
-        obs = env.reset()               # reset env to start from zero
-        ep_reward = 0.0                 # reward to 0
+        obs = env.reset()
+        ep_reward = 0.0
         min_dist = float("inf")
         reached_flag = 0
 
         for step in range(env.max_steps):
             total_steps += 1
             if total_steps < START_STEPS:
-                # random action
                 action = env.sample_action()
                 
             else:
@@ -265,19 +297,11 @@ def train():
 
                 # critic update
                 with torch.no_grad():
-                    # Compute the next action using the *target actor*
                     next_actions = actor_target(next_obs_b)
-                    # The target critic estimates Q(s', a') for next states and actions
                     q_next = critic_target(next_obs_b, next_actions)
-                    # Build the Bellman target:
-                    # Q_target = r + γ * (1 - done) * Q_target(s', a')
-                    # -> if done=1, we cut off the future return
                     q_target = rews_b + GAMMA * (1.0 - done_b) * q_next
 
-                # Current Q(s,a) estimated by the *online critic*
                 q_val = critic(obs_b, acts_b)
-
-                # Critic loss = mean squared error between current Q and target Q
                 critic_loss = nn.functional.mse_loss(q_val, q_target)
                 critic_opt.zero_grad()
                 critic_loss.backward()
@@ -292,7 +316,6 @@ def train():
                 torch.nn.utils.clip_grad_norm_(actor.parameters(), 1.0)
                 actor_opt.step()
 
-                # soft update for target models
                 soft_update(critic_target, critic, TAU)
                 soft_update(actor_target, actor, TAU)
 
@@ -348,10 +371,10 @@ def plot_metrics(metrics):
 
     # 1) Rewards per episode + moving average
     ax = axes[0, 0]
-    ax.plot(rewards, label="Reward per episode")
-    ma = moving_average(rewards, window=10)
-    if ma.size > 0:
-        ax.plot(np.arange(len(ma)) + (10 - 1), ma, label="Moving average (10)", linewidth=2)
+    ax.plot(rewards, label="Reward per episode", alpha=0.1)
+    ma, ci_low, ci_high = moving_average_with_ci(rewards, w=25)
+    ax.plot(ma, label="Moving average (10)", linewidth=2)
+    ax.fill_between(range(len(ma)), ci_low, ci_high, color='C1', alpha=0.5, label='95% CI')
     ax.set_xlabel("Episode")
     ax.set_ylabel("Reward")
     ax.set_title("Reward per episode")
@@ -370,8 +393,11 @@ def plot_metrics(metrics):
     # 3) Critic / Actor losses (per update)
     ax = axes[1, 0]
     if critic_losses.size > 0:
-        ax.plot(critic_losses, label="Critic loss")
-        ax.plot(moving_average(critic_losses, window=max(1, int(len(critic_losses)/50))), label="Critic MA", linewidth=2)
+        ax.plot(critic_losses, alpha=0.1, label="Critic loss")
+        w = max(1, int(len(critic_losses)/50))
+        ma, ci_low, ci_high = moving_average_with_ci(critic_losses, w=w)
+        ax.plot(ma, label="Critic MA", linewidth=2)
+        ax.fill_between(range(len(ma)), ci_low, ci_high, color='C1', alpha=0.5, label='95% CI')
     ax.set_xlabel("Update index")
     ax.set_ylabel("Loss")
     ax.set_title("Losses during training Critic")
@@ -380,10 +406,10 @@ def plot_metrics(metrics):
 
     # 4) Min distance per episode + moving success rate
     ax = axes[1, 1]
-    ax.plot(min_distances, label="Min distance per episode")
-    ma_dist = moving_average(min_distances, window=10)
-    if ma_dist.size > 0:
-        ax.plot(np.arange(len(ma_dist)) + (10 - 1), ma_dist, label="MA distance (10)", linewidth=2)
+    ax.plot(min_distances, label="Min distance per episode", alpha=0.1)
+    ma_dist, ci_low, ci_high = moving_average_with_ci(min_distances, w=10)
+    ax.plot(ma_dist, label="MA distance (10)", linewidth=2)
+    ax.fill_between(range(len(ma_dist)), ci_low, ci_high, color='C1', alpha=0.5, label='95% CI')
     ax.set_xlabel("Episode")
     ax.set_ylabel("Distance")
     ax.set_title("Minimum distance reached per episode")
@@ -400,22 +426,30 @@ def plot_metrics(metrics):
     # actor losses
     ax = axes[2,0]
     if actor_losses.size > 0:
-        ax.plot(-actor_losses, label="Actor loss")
-        ax.plot(moving_average(-actor_losses, window=max(1, int(len(actor_losses)/50))), label="Actor MA", linewidth=2)
+        ax.plot(-actor_losses, label="Actor loss", alpha=0.1)
+        w = max(1, int(len(actor_losses)/50))
+        ma, ci_low, ci_high = moving_average_with_ci(-actor_losses, w=w)
+        ax.plot(ma, label="Actor MA", linewidth=2)
+        ax.fill_between(range(len(ma)), ci_low, ci_high, color='C1', alpha=0.5, label='95% CI')
     ax.set_xlabel("Update index")
     ax.set_ylabel(" -Loss")
     ax.set_title("Losses during training Actor")
     ax.legend()
     ax.grid(True)
-
+    
     # number of steps do you need
     ax = axes[2,1]
-    ax.plot(number_steps, label="number_steps")
+    ax.plot(number_steps, label="number_steps", alpha=0.1)
+    ma_steps, ci_low, ci_high = moving_average_with_ci(number_steps, w=10)
+    ax.plot(ma_steps, label="MA steps (10)", linewidth=2)
+    ax.fill_between(range(len(ma_steps)), ci_low, ci_high, color='C1', alpha=0.5, label='95% CI')
     steps_needed = 45
     ax.axhline(y=steps_needed, c="r")
     ax.set_xlabel("Episode")
     ax.set_ylabel("Number steps")
     ax.set_title("Number Steps per episode")
+    ax.legend()
+    ax.grid(True)
 
 
 

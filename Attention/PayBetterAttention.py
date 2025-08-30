@@ -425,15 +425,15 @@ def plot_and_save(df: pd.DataFrame, out_png: str = 'attention_bench_torch.png') 
 
 def parse_args():
     p = argparse.ArgumentParser(description='Benchmark variants d\'attention (PyTorch)')
-    p.add_argument('--seq', type=int, nargs='+', default=[32, 64, 128, 256, 512, 1024], help='tailles de séquence à tester')
-    p.add_argument('--d', type=int, default=256, help='dimension des vecteurs Q/K/V')
-    p.add_argument('--repeats', type=int, default=10, help='nombre de répétitions pour médiane (inference)')
+    p.add_argument('--seq', type=int, nargs='+', default=[32, 64, 128, 256, 512, 1024, 2048, 4096], help='tailles de séquence à tester')
+    p.add_argument('--d', type=int, default=512, help='dimension des vecteurs Q/K/V')
+    p.add_argument('--repeats', type=int, default=15, help='nombre de répétitions pour médiane (inference)')
     p.add_argument('--train_steps', type=int, default=50, help='nombre de pas d\'entrainement pour timing (0=none)')
     p.add_argument('--out', type=str, default='attention_bench_torch_results.csv', help='fichier CSV de sortie')
     p.add_argument('--png', type=str, default='attention_bench_torch.png', help='fichier PNG de sortie (graphique)')
     p.add_argument('--seed', type=int, default=42, help='seed pour reproductibilité (optionnel)')
-    p.add_argument('--num_heads', type=int, default=8, help='nombre de têtes multi-head')
-    p.add_argument('--device', type=str, default='cpu', help="device: 'cpu' ou 'cuda' (si disponible)")
+    p.add_argument('--num_heads', type=int, default=16, help='nombre de têtes multi-head')
+    p.add_argument('--device', type=str, default='cuda', help="device: 'cpu' ou 'cuda' (si disponible)")
     return p.parse_args()
 
 
