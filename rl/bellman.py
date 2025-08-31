@@ -29,14 +29,14 @@ n_steps = 30
 
 # Starting points
 starts = [
-    # np.array([2.0, 0.0]),
-    # np.array([0.0, 2.0]),
-    # np.array([0.5, 0.5]),
-    np.array([-0.5, 4.0])
+    np.array([5.0, -5.0]),
+    np.array([25.0, 8.0]),
+    np.array([25.0, 0.0]),
+    np.array([10.0, 15.0])
 ]
 
 # Prepare contour background for Bellman residual norm
-grid_min, grid_max, N = -1.0, 10.0, 201
+grid_min, grid_max, N = -10.0, 30.0, 201
 q0_vals = np.linspace(grid_min, grid_max, N)
 q1_vals = np.linspace(grid_min, grid_max, N)
 Q0, Q1 = np.meshgrid(q0_vals, q1_vals)
@@ -80,7 +80,7 @@ for s in starts:
 
 # Plotting
 plt.figure(figsize=(9,8))
-CS = plt.contourf(Q0, Q1, res_norm, levels=40)
+CS = plt.contourf(Q0, Q1, res_norm, levels=90)
 plt.colorbar(CS, label='||T(Q) - Q|| (Bellman residual norm)')
 plt.title("Comparison: Semi-gradient vs Full-gradient vs Regression-style")
 plt.xlabel("q0")
@@ -93,18 +93,18 @@ markers = ['o', 's', 'D']
 for i in range(len(starts)):
     # semi
     traj = traj_semi[i]
-    plt.plot(traj[:,0], traj[:,1], marker=markers[0], linewidth=0.3, markersize=2, label=f"{labels[0]} start {i}" if i==0 else None)
-    plt.scatter(traj_semi[i][-1,0], traj_semi[i][-1,1], marker='*', s=80)
+    plt.plot(traj[:,0], traj[:,1], color='r', marker=markers[0], linewidth=0.3, markersize=2, label=f"{labels[0]} start {i}" if i==0 else None)
+    plt.scatter(traj_semi[i][-1,0],  traj_semi[i][-1,1],color='r', marker='*', s=80)
     # full
     traj = traj_full[i]
-    plt.plot(traj[:,0], traj[:,1], marker=markers[1], linewidth=0.3, markersize=2, label=f"{labels[1]} start {i}" if i==0 else None)
-    plt.scatter(traj_full[i][-1,0], traj_full[i][-1,1], marker='*', s=80)
+    plt.plot(traj[:,0], traj[:,1], color='g', marker=markers[1], linewidth=0.3, markersize=2, label=f"{labels[1]} start {i}" if i==0 else None)
+    plt.scatter(traj_full[i][-1,0], traj_full[i][-1,1], color='g', marker='*', s=80)
     # reg
     traj = traj_reg[i]
-    plt.plot(traj[:,0], traj[:,1], marker=markers[2], linewidth=0.3, markersize=2, label=f"{labels[2]} start {i}" if i==0 else None)
-    plt.scatter(traj_reg[i][-1,0], traj_reg[i][-1,1], marker='*', s=80)
+    plt.plot(traj[:,0], traj[:,1], color='b', marker=markers[2], linewidth=0.3, markersize=2, label=f"{labels[2]} start {i}" if i==0 else None)
+    plt.scatter(traj_reg[i][-1,0], traj_reg[i][-1,1], color='b', marker='*', s=80)
     # annotate only first and last for clarity
-    plt.scatter(starts[i][0], starts[i][1], marker='x', s=80)
+    plt.scatter(starts[i][0], starts[i][1], color='orange', marker='x', s=80)
 
 
 plt.legend(loc='upper left', framealpha=0.9)
