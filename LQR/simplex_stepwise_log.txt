@@ -1,0 +1,165 @@
+Simplex stepwise log started at 2025-09-02T07:47:09.517294
+
+=== SIMPLEX STEPWISE TRACE ===
+
+Problem: maximize c^T x subject to A x <= b, x >= 0
+
+Initial tableau (slack variables in base):
+                x1       x2       x3       s1       s2       s3      RHS
+constr_1    1.0000   1.0000   1.0000   1.0000   0.0000   0.0000   4.0000
+constr_2    1.0000   0.0000   0.5000   0.0000   1.0000   0.0000   2.0000
+constr_3    0.0000   1.0000   0.5000   0.0000   0.0000   1.0000   3.0000
+objective  -3.0000  -2.0000  -3.0000  -0.0000  -0.0000  -0.0000   0.0000
+Initial base (indices) : [3, 4, 5] -> ['s1', 's2', 's3']
+
+================================================================================
+ITERATION 1 -- Current base: ['s1', 's2', 's3']
+Current tableau:
+                x1       x2       x3       s1       s2       s3      RHS
+constr_1    1.0000   1.0000   1.0000   1.0000   0.0000   0.0000   4.0000
+constr_2    1.0000   0.0000   0.5000   0.0000   1.0000   0.0000   2.0000
+constr_3    0.0000   1.0000   0.5000   0.0000   0.0000   1.0000   3.0000
+objective  -3.0000  -2.0000  -3.0000  -0.0000  -0.0000  -0.0000   0.0000
+Current primal x: [0. 0. 0.], objective = 0.000000
+
+Reduced costs (objective row):
+x1:-3.000000, x2:-2.000000, x3:-3.000000, s1:-0.000000, s2:-0.000000, s3:-0.000000
+
+Entering candidates: ['x1', 'x2', 'x3']
+Chosen entering var: x1 (col 0, reduced cost -3.000000)
+Entering column (coeffs by row): r0:1.000000, r1:1.000000, r2:0.000000
+Ratio candidates (rhs/coeff): r0:4.000000, r1:2.000000
+Chosen leaving row: row 1 (basic var s2), pivot = 1.000000, ratio = 2.000000
+
+Leaving row (before normalization):
+1.000000 | 0.000000 | 0.500000 | 0.000000 | 1.000000 | 0.000000 | 2.000000   <-- constr_2
+
+Leaving row after normalization (divide by pivot):
+1.000000 | 0.000000 | 0.500000 | 0.000000 | 1.000000 | 0.000000 | 2.000000
+
+Elimination operations (for each other row):
+ Row 0 (before): 1.000000 | 1.000000 | 1.000000 | 1.000000 | 0.000000 | 0.000000 | 4.000000
+  -> Row 0 <- Row 0 - (1.000000) * normalized_row
+ Row 0 (after):  0.000000 | 1.000000 | 0.500000 | 1.000000 | -1.000000 | 0.000000 | 2.000000
+ Row 2: factor = 0.000000 (~0) -> no operation, unchanged.
+ Row 3 (before): -3.000000 | -2.000000 | -3.000000 | -0.000000 | -0.000000 | -0.000000 | 0.000000
+  -> Row 3 <- Row 3 - (-3.000000) * normalized_row
+ Row 3 (after):  0.000000 | -2.000000 | -1.500000 | 0.000000 | 3.000000 | 0.000000 | 6.000000
+
+Post-pivot tableau:
+                x1       x2       x3       s1       s2       s3      RHS
+constr_1    0.0000   1.0000   0.5000   1.0000  -1.0000   0.0000   2.0000
+constr_2    1.0000   0.0000   0.5000   0.0000   1.0000   0.0000   2.0000
+constr_3    0.0000   1.0000   0.5000   0.0000   0.0000   1.0000   3.0000
+objective   0.0000  -2.0000  -1.5000   0.0000   3.0000   0.0000   6.0000
+Updated base: ['s1', 'x1', 's3']
+New solution (x): [2. 0. 0.], objective = 6.000000
+
+================================================================================
+ITERATION 2 -- Current base: ['s1', 'x1', 's3']
+Current tableau:
+                x1       x2       x3       s1       s2       s3      RHS
+constr_1    0.0000   1.0000   0.5000   1.0000  -1.0000   0.0000   2.0000
+constr_2    1.0000   0.0000   0.5000   0.0000   1.0000   0.0000   2.0000
+constr_3    0.0000   1.0000   0.5000   0.0000   0.0000   1.0000   3.0000
+objective   0.0000  -2.0000  -1.5000   0.0000   3.0000   0.0000   6.0000
+Current primal x: [2. 0. 0.], objective = 6.000000
+
+Reduced costs (objective row):
+x1:+0.000000, x2:-2.000000, x3:-1.500000, s1:+0.000000, s2:+3.000000, s3:+0.000000
+
+Entering candidates: ['x2', 'x3']
+Chosen entering var: x2 (col 1, reduced cost -2.000000)
+Entering column (coeffs by row): r0:1.000000, r1:0.000000, r2:1.000000
+Ratio candidates (rhs/coeff): r0:2.000000, r2:3.000000
+Chosen leaving row: row 0 (basic var s1), pivot = 1.000000, ratio = 2.000000
+
+Leaving row (before normalization):
+0.000000 | 1.000000 | 0.500000 | 1.000000 | -1.000000 | 0.000000 | 2.000000   <-- constr_1
+
+Leaving row after normalization (divide by pivot):
+0.000000 | 1.000000 | 0.500000 | 1.000000 | -1.000000 | 0.000000 | 2.000000
+
+Elimination operations (for each other row):
+ Row 1: factor = 0.000000 (~0) -> no operation, unchanged.
+ Row 2 (before): 0.000000 | 1.000000 | 0.500000 | 0.000000 | 0.000000 | 1.000000 | 3.000000
+  -> Row 2 <- Row 2 - (1.000000) * normalized_row
+ Row 2 (after):  0.000000 | 0.000000 | 0.000000 | -1.000000 | 1.000000 | 1.000000 | 1.000000
+ Row 3 (before): 0.000000 | -2.000000 | -1.500000 | 0.000000 | 3.000000 | 0.000000 | 6.000000
+  -> Row 3 <- Row 3 - (-2.000000) * normalized_row
+ Row 3 (after):  0.000000 | 0.000000 | -0.500000 | 2.000000 | 1.000000 | 0.000000 | 10.000000
+
+Post-pivot tableau:
+                x1       x2       x3       s1       s2       s3      RHS
+constr_1    0.0000   1.0000   0.5000   1.0000  -1.0000   0.0000   2.0000
+constr_2    1.0000   0.0000   0.5000   0.0000   1.0000   0.0000   2.0000
+constr_3    0.0000   0.0000   0.0000  -1.0000   1.0000   1.0000   1.0000
+objective   0.0000   0.0000  -0.5000   2.0000   1.0000   0.0000  10.0000
+Updated base: ['x2', 'x1', 's3']
+New solution (x): [2. 2. 0.], objective = 10.000000
+
+================================================================================
+ITERATION 3 -- Current base: ['x2', 'x1', 's3']
+Current tableau:
+                x1       x2       x3       s1       s2       s3      RHS
+constr_1    0.0000   1.0000   0.5000   1.0000  -1.0000   0.0000   2.0000
+constr_2    1.0000   0.0000   0.5000   0.0000   1.0000   0.0000   2.0000
+constr_3    0.0000   0.0000   0.0000  -1.0000   1.0000   1.0000   1.0000
+objective   0.0000   0.0000  -0.5000   2.0000   1.0000   0.0000  10.0000
+Current primal x: [2. 2. 0.], objective = 10.000000
+
+Reduced costs (objective row):
+x1:+0.000000, x2:+0.000000, x3:-0.500000, s1:+2.000000, s2:+1.000000, s3:+0.000000
+
+Entering candidates: ['x3']
+Chosen entering var: x3 (col 2, reduced cost -0.500000)
+Entering column (coeffs by row): r0:0.500000, r1:0.500000, r2:0.000000
+Ratio candidates (rhs/coeff): r0:4.000000, r1:4.000000
+ Degeneracy detected (multiple rows share min ratio = 4.000000). Tie-breaking by smallest index.
+Chosen leaving row: row 0 (basic var x2), pivot = 0.500000, ratio = 4.000000
+
+Leaving row (before normalization):
+0.000000 | 1.000000 | 0.500000 | 1.000000 | -1.000000 | 0.000000 | 2.000000   <-- constr_1
+
+Leaving row after normalization (divide by pivot):
+0.000000 | 2.000000 | 1.000000 | 2.000000 | -2.000000 | 0.000000 | 4.000000
+
+Elimination operations (for each other row):
+ Row 1 (before): 1.000000 | 0.000000 | 0.500000 | 0.000000 | 1.000000 | 0.000000 | 2.000000
+  -> Row 1 <- Row 1 - (0.500000) * normalized_row
+ Row 1 (after):  1.000000 | -1.000000 | 0.000000 | -1.000000 | 2.000000 | 0.000000 | 0.000000
+ Row 2: factor = 0.000000 (~0) -> no operation, unchanged.
+ Row 3 (before): 0.000000 | 0.000000 | -0.500000 | 2.000000 | 1.000000 | 0.000000 | 10.000000
+  -> Row 3 <- Row 3 - (-0.500000) * normalized_row
+ Row 3 (after):  0.000000 | 1.000000 | 0.000000 | 3.000000 | 0.000000 | 0.000000 | 12.000000
+
+Post-pivot tableau:
+                x1       x2       x3       s1       s2       s3      RHS
+constr_1    0.0000   2.0000   1.0000   2.0000  -2.0000   0.0000   4.0000
+constr_2    1.0000  -1.0000   0.0000  -1.0000   2.0000   0.0000   0.0000
+constr_3    0.0000   0.0000   0.0000  -1.0000   1.0000   1.0000   1.0000
+objective   0.0000   1.0000   0.0000   3.0000   0.0000   0.0000  12.0000
+Updated base: ['x3', 'x1', 's3']
+New solution (x): [0. 0. 4.], objective = 12.000000
+
+================================================================================
+ITERATION 4 -- Current base: ['x3', 'x1', 's3']
+Current tableau:
+                x1       x2       x3       s1       s2       s3      RHS
+constr_1    0.0000   2.0000   1.0000   2.0000  -2.0000   0.0000   4.0000
+constr_2    1.0000  -1.0000   0.0000  -1.0000   2.0000   0.0000   0.0000
+constr_3    0.0000   0.0000   0.0000  -1.0000   1.0000   1.0000   1.0000
+objective   0.0000   1.0000   0.0000   3.0000   0.0000   0.0000  12.0000
+Current primal x: [0. 0. 4.], objective = 12.000000
+
+Reduced costs (objective row):
+x1:+0.000000, x2:+1.000000, x3:+0.000000, s1:+3.000000, s2:+0.000000, s3:+0.000000
+
+No negative reduced cost -> optimal solution reached.
+================================================================================
+FINAL SUMMARY:
+Final base: ['x3', 'x1', 's3']
+Final solution x: [0. 0. 4.]
+Final objective: 12.000000
+Log saved to: LQR/simplex_stepwise_log.txt
+History CSV saved to: LQR/simplex_stepwise_history.csv
