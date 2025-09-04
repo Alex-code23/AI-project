@@ -264,14 +264,15 @@ def train():
 
         for step in range(env.max_steps):
             total_steps += 1
+
+            # choose 
             if total_steps < START_STEPS:
                 action = env.sample_action()
-                
             else:
                 obs_t = torch.as_tensor(obs, dtype=torch.float32, device=DEVICE).unsqueeze(0)
                 with torch.no_grad():
                     action = actor(obs_t).cpu().numpy()[0]
-                action = action + np.random.normal(scale=NOISE_SCALE, size=act_dim) # exploration noise
+                action = action + np.random.normal(scale=NOISE_SCALE, size=act_dim)  # NOISE DISTRIBUTION 
                 action = np.clip(action, env.action_low, env.action_high)
 
             action_history.append(float(action[0]))
@@ -286,7 +287,7 @@ def train():
             obs = next_obs
             ep_reward += reward
 
-            # update networks
+            # update
             if buffer.size >= BATCH_SIZE:
                 batch = buffer.sample(BATCH_SIZE)
                 obs_b = batch["obs"]
@@ -295,23 +296,24 @@ def train():
                 next_obs_b = batch["next_obs"]
                 done_b = batch["done"]
 
-                # critic update
+                # ---- critic update ----
                 with torch.no_grad():
                     next_actions = actor_target(next_obs_b)
-                    q_next = critic_target(next_obs_b, next_actions) # Q(s', a') and not V(s') beacause buffer contains (s,a,s')
+                    q_next = critic_target(next_obs_b, next_actions)
                     q_target = rews_b + GAMMA * (1.0 - done_b) * q_next
 
                 q_val = critic(obs_b, acts_b)
+                
                 critic_loss = nn.functional.mse_loss(q_val, q_target)
                 critic_opt.zero_grad()
                 critic_loss.backward()
                 torch.nn.utils.clip_grad_norm_(critic.parameters(), 1.0)
                 critic_opt.step()
 
-                # actor update
+                # ---- actor update ----
                 actor_opt.zero_grad()
                 cur_actions = actor(obs_b)
-                actor_loss = -critic(obs_b, cur_actions).mean()
+                actor_loss = -critic(obs_b, cur_actions).mean() # LOSS IS COMING FROM ACTOR
                 actor_loss.backward()
                 torch.nn.utils.clip_grad_norm_(actor.parameters(), 1.0)
                 actor_opt.step()
@@ -330,7 +332,7 @@ def train():
         min_distances.append(min_dist)
         success_flags.append(reached_flag)
 
-        if ep % 20 == 0 or ep == 1:
+        if ep % 10 == 0 or ep == 1:
             avg_last = np.mean(rewards_history[-10:])
             succ_rate_10 = np.mean(success_flags[-10:]) if len(success_flags) >= 1 else 0.0
             print(f"Episode {ep:3d} | ep_reward {ep_reward:6.2f} | avg_last10 {avg_last:6.2f} | succ10 {succ_rate_10:.2f} | buffer {buffer.size}")
