@@ -17,12 +17,13 @@ n_samples = 1000
 
 # Create our sphere.
 random_state = check_random_state(0)
-p = random_state.rand(n_samples) * (2 * np.pi - 0.55)
-t = random_state.rand(n_samples) * np.pi
+p = random_state.rand(n_samples) * (2 * np.pi - 0.55) # angle azimutal, [0, 2pi-0.55]
+t = random_state.rand(n_samples) * np.pi    # angle polaire, [0, pi]
 
 # Sever the poles from the sphere.
-indices = (t < (np.pi - (np.pi / 8))) & (t > (np.pi / 8))
+indices = (t < (np.pi - (np.pi / 8))) & (t > (np.pi / 8)) # on enlève les pôles
 colors = p[indices]
+# Convert to cartesian coordinates for the sphere.
 x, y, z = (
     np.sin(t[indices]) * np.cos(p[indices]),
     np.sin(t[indices]) * np.sin(p[indices]),
@@ -39,9 +40,11 @@ ax = fig.add_subplot(251, projection="3d")
 ax.scatter(x, y, z, c=p[indices], cmap=plt.cm.rainbow)
 ax.view_init(40, -10)
 
-sphere_data = np.array([x, y, z]).T
+sphere_data = np.array([x, y, z]).T     # shape (n_samples, 3)
 
-# Perform Locally Linear Embedding Manifold learning
+# Perform Locally Linear Embedding Manifold learning, We have four different
+# methods: standard, ltsa, hessian, modified. Each method has different way to
+# compute the weights.
 methods = ["standard", "ltsa", "hessian", "modified"]
 labels = ["LLE", "LTSA", "Hessian LLE", "Modified LLE"]
 
