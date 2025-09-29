@@ -1,0 +1,74 @@
+import numpy as np
+
+from sklearn.datasets import make_circles
+
+n_samples = 200
+X, y = make_circles(n_samples=n_samples, shuffle=False)
+outer, inner = 0, 1
+labels = np.full(n_samples, -1.0)
+labels[0] = outer   # =0
+labels[-1] = inner  # =1
+
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(4, 4))
+plt.scatter(
+    X[labels == outer, 0],
+    X[labels == outer, 1],
+    color="navy",
+    marker="s",
+    lw=0,
+    label="outer labeled",
+    s=10,
+)
+plt.scatter(
+    X[labels == inner, 0],
+    X[labels == inner, 1],
+    color="c",
+    marker="s",
+    lw=0,
+    label="inner labeled",
+    s=10,
+)
+plt.scatter(
+    X[labels == -1, 0],
+    X[labels == -1, 1],
+    color="darkorange",
+    marker=".",
+    label="unlabeled",
+)
+plt.legend(scatterpoints=1, shadow=False, loc="center")
+_ = plt.title("Raw data (2 classes=outer and inner)")
+
+from sklearn.semi_supervised import LabelSpreading
+
+label_spread = LabelSpreading(kernel="knn", alpha=0.8)
+label_spread.fit(X, labels)
+
+output_labels = label_spread.transduction_
+output_label_array = np.asarray(output_labels)
+outer_numbers = (output_label_array == outer).nonzero()[0]
+inner_numbers = (output_label_array == inner).nonzero()[0]
+
+plt.figure(figsize=(4, 4))
+plt.scatter(
+    X[outer_numbers, 0],
+    X[outer_numbers, 1],
+    color="navy",
+    marker="s",
+    lw=0,
+    s=10,
+    label="outer learned",
+)
+plt.scatter(
+    X[inner_numbers, 0],
+    X[inner_numbers, 1],
+    color="c",
+    marker="s",
+    lw=0,
+    s=10,
+    label="inner learned",
+)
+plt.legend(scatterpoints=1, shadow=False, loc="center")
+plt.title("Labels learned with Label Spreading (KNN)")
+plt.show()
