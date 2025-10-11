@@ -21,11 +21,6 @@ from math import ceil
 from sklearn.model_selection import train_test_split
 from sklearn.isotonic import IsotonicRegression
 
-# For nicer DataFrame display in the notebook UI (caas helper)
-try:
-    from caas_jupyter_tools import display_dataframe_to_user
-except Exception:
-    display_dataframe_to_user = None
 
 np.random.seed(0)
 
@@ -52,8 +47,6 @@ data = pd.DataFrame({
     "monthly_spend": monthly_spend
 })
 
-if display_dataframe_to_user is not None:
-    display_dataframe_to_user("Données réelles (extrait)", data.sample(10))
 
 print("Dataset summary (real data):")
 print(data.describe().T[["min","mean","50%","max"]])
@@ -119,8 +112,6 @@ synth_gauss = pd.DataFrame({
     "monthly_spend": spend_synth_gauss
 })
 
-if display_dataframe_to_user is not None:
-    display_dataframe_to_user("Synthétique - Gaussian Copula (extrait)", synth_gauss.sample(10))
 
 print("\nGaussian copula: empirical correlation matrix of latent normals:")
 print(corr_matrix)
@@ -252,8 +243,6 @@ if use_nn:
         "monthly_spend": spend_synth_nn
     })
 
-    if display_dataframe_to_user is not None:
-        display_dataframe_to_user("Synthétique - Neural Copula (extrait)", synth_nn.sample(10))
 
 # ---------- 3) Visual comparison: pairwise scatter plots ----------
 def pair_scatter_grid(real_df, synth_df, title_real="Real", title_synth="Synthetic"):
