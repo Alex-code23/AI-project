@@ -53,8 +53,8 @@ print(data.describe().T[["min","mean","50%","max"]])
 
 # ---------- Helpers: empirical CDF and quantile interpolation ----------
 def empirical_uniforms(x):
-    """Return empirical CDF values in (0,1) using rank / (n+1)"""
-    ranks = stats.rankdata(x, method="average")
+    """Return empirical CDF, values in (0,1) using rank / (n+1)"""
+    ranks = stats.rankdata(x, method="average") 
     u = ranks / (len(x) + 1.0)
     return u
 
