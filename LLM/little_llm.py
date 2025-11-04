@@ -266,7 +266,7 @@ class SimpleLLM(nn.Module):
 
         optimizer = torch.optim.AdamW(self.parameters(), lr=lr)
 
-        scaler = GradScaler(enabled=(use_amp and device.type == "cuda"))
+        scaler = torch.amp.GradScaler(enabled=(use_amp and device.type == "cuda"))
         global_step = 0
 
         # metrics to plot
