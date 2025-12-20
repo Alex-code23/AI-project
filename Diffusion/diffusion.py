@@ -37,9 +37,9 @@ def make_blob_image(size=64):
 data = [torch.from_numpy(make_blob_image(image_size)).unsqueeze(0) for _ in range(N)]
 
 # --- schedule DDPM lite ---
-betas = np.linspace(1e-4, 0.02, T, dtype=np.float32)
-alphas = 1.0 - betas
-alpha_cumprod = np.cumprod(alphas, axis=0)
+betas = np.linspace(1e-4, 0.02, T, dtype=np.float32) # beta
+alphas = 1.0 - betas                                  
+alpha_cumprod = np.cumprod(alphas, axis=0) # cumprod = cumulative product of elements along a given axis.
 sqrt_alpha_cumprod = np.sqrt(alpha_cumprod)
 sqrt_one_minus_alpha_cumprod = np.sqrt(1 - alpha_cumprod)
 
@@ -103,7 +103,7 @@ loss_fn = nn.MSELoss()
 for step in range(1, n_steps+1):
     idx = np.random.choice(N, batch_size, replace=False)
     xb = torch.stack([data[i] for i in idx]).to(device)   # Bx1xHxW
-    B = xb.shape[0]
+    B = xb.shape[0] # B = batch size
     t = torch.randint(0, T, (B,), device=device, dtype=torch.long)
     eps = torch.randn_like(xb)
     x_noisy = q_sample(xb, t, eps)
