@@ -81,8 +81,8 @@ symbol_dict = {
 symbols, names = np.array(sorted(symbol_dict.items())).T
 
 # User-configurable options
-start = "2021-01-01"   # or set None and use period below
-end = "2023-12-31"     # e.g. "2023-12-31" or None
+start = "2024-01-01"   # or set None and use period below
+end = "2025-12-29"     # e.g. "2023-12-31" or None
 # 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
 period = "3mo"         # e.g. "5y" - if not None, start/end are ignored
 align = "intersection" # "intersection" (common dates) or "union" (outer join, may contain NaNs)
