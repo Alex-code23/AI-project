@@ -211,13 +211,13 @@ if __name__ == '__main__':
     labels = ([1] * len(influencer_texts)) + ([0] * len(non_influencer_texts))
 
     # On peut multiplier le tout pour simuler un volume plus gros si nécessaire
-    raw_texts = raw_texts
-    labels = labels
+    raw_texts = raw_texts * 5
+    labels = labels * 5
 
     # --- B. Paramètres ---
     MAX_LEN = 64
     BATCH_SIZE = 4 # Petit batch car CamemBERT est lourd
-    EPOCHS = 3
+    EPOCHS = 5
     LEARNING_RATE = 2e-5 # Très petit LR pour le fine-tuning
 
     # --- C. Tokenizer & DataLoaders ---
