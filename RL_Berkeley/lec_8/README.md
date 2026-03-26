@@ -37,11 +37,14 @@ Le Q-Learning standard surestime systématiquement les valeurs Q car $E[\max(X)]
 **Solution :** Découpler la *sélection* de l'action et son *évaluation*.
 * Utiliser le réseau actuel $\phi$ pour choisir l'action.
 * Utiliser le réseau cible $\phi'$ pour évaluer sa valeur.
-$$y = r + \gamma Q_{\phi'}(s', \arg\max_{a'} Q_\phi(s', a'))$$.
+
+$$y = r + \gamma Q_{\phi'}(s', \arg\max_{a'} Q_\phi(s', a'))$$
 
 ### Multi-step Returns (N-step)
 Au lieu d'utiliser un seul pas de récompense (Bellman pur), on utilise $N$ pas avant de bootstraper.
-$$y_{i,t} = \sum_{k=0}^{N-1} \gamma^k r_{t+k} + \gamma^N \max_{a'} Q_{\phi'}(s_{i, t+N}, a')$$.
+
+$$y_{i,t} = \sum_{k=0}^{N-1} \gamma^k r_{t+k} + \gamma^N \max_{a'} Q_{\phi'}(s_{i, t+N}, a')$$
+
 * **Trade-off :** Réduit le biais (moins de dépendance à l'estimation Q initiale) mais augmente la variance (plus de récompenses stochastiques accumulées). Souvent, $N$ entre 3 et 5 fonctionne bien.
 
 ---
